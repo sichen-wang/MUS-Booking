@@ -53,6 +53,16 @@ PLACES: List[str] = [
     "MPC524室内乐琴房（Double GP）",
 ]
 
-# ---- 工具函数 ----
+# ---- 默认值 ----
+DEFAULT_THEME: str = "练琴"
+
+# 预定结果关键字：命中任一则停止重试
+MUST_STOP_KEYWORDS: Tuple[str, ...] = (
+    "Cookie 过期",
+    "保存成功",
+    "手速太慢，该时间段已经被预订啦",
+    "请求失败, 检查网络、代理服务器或 VPN",
+)
+
 # proxies 不再是必填项，因为直接连接（校园网内或 AnyConnect VPN）时不需要代理
 REQUIRED_FIELDS: Tuple[str, ...] = ("user_id", "user_password", "user_name", "user_email")

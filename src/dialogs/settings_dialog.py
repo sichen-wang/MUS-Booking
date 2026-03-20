@@ -6,19 +6,11 @@ SettingsDialog对话框
 
 from __future__ import annotations
 
-import os
-import sys
-import json
-import time
-import math
-from dataclasses import dataclass, asdict
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Optional, Tuple
-
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 # 导入配置管理
 from config import AppConfig
+from constants import DEFAULT_THEME
 
 
 class SettingsDialog(QtWidgets.QDialog):
@@ -56,8 +48,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self.le_phone = QtWidgets.QLineEdit(cfg.user_phone)
         self.le_phone.setPlaceholderText("123456")
 
-        self.le_theme = QtWidgets.QLineEdit(cfg.theme or "练琴")
-        self.le_theme.setPlaceholderText("练琴")
+        self.le_theme = QtWidgets.QLineEdit(cfg.theme or DEFAULT_THEME)
+        self.le_theme.setPlaceholderText(DEFAULT_THEME)
 
         form = QtWidgets.QFormLayout()
         form.addRow(label("学号", True), self.le_uid)
@@ -96,6 +88,6 @@ class SettingsDialog(QtWidgets.QDialog):
         self.cfg.user_name = self.le_uname.text().strip()
         self.cfg.user_email = self.le_email.text().strip()
         self.cfg.user_phone = self.le_phone.text().strip()
-        self.cfg.theme = self.le_theme.text().strip() or "练琴"
+        self.cfg.theme = self.le_theme.text().strip() or DEFAULT_THEME
         self.saved.emit(self.cfg)
         self.accept()

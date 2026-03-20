@@ -7,27 +7,14 @@
 from __future__ import annotations
 
 import os
-import sys
-import json
-import time
-import math
 from dataclasses import dataclass, asdict
 from datetime import datetime, date, timedelta
-from typing import List, Dict, Optional, Tuple
-
-from PySide6 import QtCore, QtGui, QtWidgets, QtNetwork
-
-try:
-    from PySide6.QtWebEngineWidgets import QWebEngineView
-    from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
-    WEBENGINE_AVAILABLE = True
-except ImportError:
-    WEBENGINE_AVAILABLE = False
+from typing import List, Optional
 
 import yaml
 
 # 导入常量和工具函数
-from constants import PLACES, REQUIRED_FIELDS
+from constants import PLACES, DEFAULT_THEME
 from utils import app_base_dir
 
 CONFIG_FILE = os.path.join(app_base_dir(), "config.yaml")
@@ -53,9 +40,9 @@ class AppConfig:
     user_name: str = ""
     user_email: str = ""
     user_phone: str = ""
-    theme: str = "练琴"
+    theme: str = DEFAULT_THEME
 
-    requests: List[RequestItemData] = None  # type: ignore
+    requests: Optional[List[RequestItemData]] = None  # type: ignore
 
     def __post_init__(self):
         if self.requests is None:
@@ -83,7 +70,7 @@ class ConfigManager:
             user_name=raw.get("user_name", ""),
             user_email=raw.get("user_email", ""),
             user_phone=raw.get("user_phone", ""),
-            theme=raw.get("theme", "练琴"),
+            theme=raw.get("theme", DEFAULT_THEME),
             requests=reqs or [RequestItemData()],
         )
         return cfg

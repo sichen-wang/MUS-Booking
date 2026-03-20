@@ -6,11 +6,14 @@
 import sys
 import os
 
-# 添加父目录到path以便导入GUI模块
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 添加 src 目录到 path 以便导入模块化结构
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
 
 try:
-    from GUI import QtWidgets, WEBENGINE_AVAILABLE, AutoLoginDialog, ConfigManager, parse_proxies
+    from PySide6 import QtWidgets
+    from dialogs.auto_login_dialog import WEBENGINE_AVAILABLE, AutoLoginDialog
+    from config import ConfigManager
+    from utils import parse_proxies
 
     print("[OK] GUI module imported successfully")
     print(f"[INFO] QtWebEngine available: {WEBENGINE_AVAILABLE}")

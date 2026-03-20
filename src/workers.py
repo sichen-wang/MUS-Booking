@@ -6,25 +6,10 @@ BookingWorker线程
 
 from __future__ import annotations
 
-import os
-import sys
-import json
 import time
-import math
-from dataclasses import dataclass, asdict
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Optional, Tuple
+from typing import List, Tuple
 
-from PySide6 import QtCore, QtGui, QtWidgets, QtNetwork
-
-try:
-    from PySide6.QtWebEngineWidgets import QWebEngineView
-    from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
-    WEBENGINE_AVAILABLE = True
-except ImportError:
-    WEBENGINE_AVAILABLE = False
-
-import yaml
+from PySide6 import QtCore
 
 # 导入核心预订函数
 from main import book
@@ -32,8 +17,9 @@ from main import book
 # 导入配置管理
 from config import AppConfig
 
-# 导入工具函数
+# 导入工具函数和常量
 from utils import parse_proxies
+from constants import DEFAULT_THEME, MUST_STOP_KEYWORDS
 
 
 class BookingWorker(QtCore.QThread):
@@ -63,12 +49,12 @@ class BookingWorker(QtCore.QThread):
             end_time=end_ts,
             user_email=self.cfg.user_email,
             user_phone=self.cfg.user_phone,
-            theme=self.cfg.theme or "练琴",
+            theme=self.cfg.theme or DEFAULT_THEME,
             proxies=parse_proxies(self.cfg.proxies),
         )
 
     def run(self):
-        MUST_STOP = ["Cookie 过期", "保存成功", "手速太慢，该时间段已经被预订啦", "请求失败, 检查网络、代理服务器或 VPN"]
+        MUST_STOP = MUST_STOP_KEYWORDS
         for (place, start_ts, end_ts) in self.chunks:
             if self._stop_flag:
                 break

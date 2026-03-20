@@ -8,23 +8,16 @@ from __future__ import annotations
 
 import os
 import sys
-import json
-import time
-import math
-from dataclasses import dataclass, asdict
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Optional, Tuple
+from datetime import datetime
+from typing import List, Tuple
 
-from PySide6 import QtCore, QtGui, QtWidgets, QtNetwork
+from PySide6 import QtCore, QtGui, QtWidgets
 
 try:
-    from PySide6.QtWebEngineWidgets import QWebEngineView
-    from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
+    from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
     WEBENGINE_AVAILABLE = True
 except ImportError:
     WEBENGINE_AVAILABLE = False
-
-import yaml
 
 # 导入工具函数
 from utils import app_base_dir, resource_path, parse_proxies, hhmm_to_minutes, minutes_to_hhmm, split_to_slots

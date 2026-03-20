@@ -49,13 +49,16 @@ def _load_core():
     """
     # 1) 直接从文件加载（优先）：main.py / main.txt（资源路径）
     try:
-        from importlib.machinery import SourceFileLoader
+        import importlib.util
         for name in ("main.py", "main.txt"):
             cand = resource_path(name)
             if os.path.exists(cand):
-                core = SourceFileLoader("cuhk_booking_core", cand).load_module()  # type: ignore[deprecated]
-                if hasattr(core, "book") and hasattr(core, "timer_run"):
-                    return core
+                spec = importlib.util.spec_from_file_location("cuhk_booking_core", cand)
+                if spec and spec.loader:
+                    core = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(core)
+                    if hasattr(core, "book") and hasattr(core, "timer_run"):
+                        return core
     except Exception:
         pass
 

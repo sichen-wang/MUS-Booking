@@ -6,15 +6,6 @@ AutoLoginDialog对话框
 
 from __future__ import annotations
 
-import os
-import sys
-import json
-import time
-import math
-from dataclasses import dataclass, asdict
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Optional, Tuple
-
 from PySide6 import QtCore, QtGui, QtWidgets, QtNetwork
 
 try:
@@ -134,6 +125,12 @@ if WEBENGINE_AVAILABLE:
 
             if self._auto_capture_fallback_timer and self._auto_capture_fallback_timer.isActive():
                 self._auto_capture_fallback_timer.stop()
+
+            # 断开 Cookie 监听信号，防止关闭后回调
+            try:
+                self.cookie_store.cookieAdded.disconnect(self._on_cookie_added)
+            except (RuntimeError, TypeError):
+                pass
 
             # 先断开 Browser 和 Page 的连接
             self.browser.setPage(None)

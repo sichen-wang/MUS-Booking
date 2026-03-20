@@ -6,19 +6,7 @@ CookieDialog对话框
 
 from __future__ import annotations
 
-import os
-import sys
-import json
-import time
-import math
-from dataclasses import dataclass, asdict
-from datetime import datetime, date, timedelta
-from typing import List, Dict, Optional, Tuple
-
-from PySide6 import QtCore, QtGui, QtWidgets
-
-# 导入工具函数
-from utils import parse_proxies
+from PySide6 import QtCore, QtWidgets
 
 # 导入代理检测模块
 try:
