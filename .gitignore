@@ -61,3 +61,4 @@ venv/
 
 # 登录链路探测报告（本地生成，不入库）
 probe-report*.txt
+probe-pages/

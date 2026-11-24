@@ -12,9 +12,12 @@
 
 没有 uv 时：pip install httpx 后用 python 直接运行。
 
-密码只会提交给 sts.cuhk.edu.cn，不落盘、不打印。报告（probe-report.txt）只含
-主机、路径、状态码、耗时、Cookie 名、字段名和少量流程控制字段，不含凭据、令牌
-或个人信息，可以直接转交。
+密码只会提交给 sts.cuhk.edu.cn，不落盘、不打印。产出两样东西：
+
+- probe-report.txt：只含主机、路径、状态码、耗时、Cookie 名、字段名和少量流程
+  控制字段，不含凭据、令牌或个人信息，可以直接转交。
+- probe-pages/：抓到的预订系统页面和脚本原文，用来分析表单结构。登录后的页面
+  会包含该账号的姓名、学号等信息，所以只留在本机，不要外传。传 --pages "" 可关闭。
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit
 import httpx
 
 BOOKING = "https://booking.cuhk.edu.cn/"
+BOOKING_HOST = "booking.cuhk.edu.cn"
 BOOKING_HOME = "https://booking.cuhk.edu.cn/a/field/client/main"
 ADFS_HOST = "sts.cuhk.edu.cn"
 ATRUST = "https://atrust.cuhk.edu.cn"
@@ -67,14 +71,28 @@ SAFE_KEYS = {
     "code", "message", "nextService", "type", "subtype", "subType", "authType", "source", "dest",
     "secondAuthType", "need", "isLogin", "autoRedirect", "enableStartClient", "status",
 }
-# 已登录后只读探查时，绝不访问带这些字样的地址
-UNSAFE_PATH = re.compile(
-    r"logout|exit|delete|remove|cancel|save|update|submit|confirm|approve|apply|add|create|insert"
-    r"|send|reset|clear|disable|enable|pay|del[A-Z/]",
+
+# 预订系统落地页里，带这些字样的地址可能是登录入口
+LOGIN_URL = re.compile(r"""["'`]([^"'`\s<>]*(?:login|sso|oauth|adfs)[^"'`\s<>]*)["'`]""", re.I)
+LOGIN_GUESSES = ("/a/login", "/sso/login", "/login")
+LOGIN_TRIES = 8
+STATIC_EXT = re.compile(r"\.(?:js|css|png|jpe?g|gif|svg|ico|woff2?|ttf|map)$", re.I)
+LIBRARY_SCRIPT = re.compile(
+    r"jquery|bootstrap|layer|select2|wdate|my97|validat|ztree|echarts|adminlte|icheck|moment"
+    r"|i18n|font|polyfill|\.min\.js",
     re.I,
 )
-EXPLORE_PATH = re.compile(r"form|list|main|index|book|rule|select|tree", re.I)
-EXPLORE_LIMIT = 12
+SCRIPT_LIMIT = 15
+# 已登录后只读探查时，绝不访问带这些字样的地址
+UNSAFE_PATH = re.compile(
+    r"log.?out|sign.?out|exit|delete|remove|cancel|save|update|submit|confirm|approve|apply|add|create"
+    r"|insert|send|reset|clear|disable|enable|pay|del[A-Z/]",
+    re.I,
+)
+EXPLORE_PATH = re.compile(r"form|list|main|index|book|rule|select|tree|field|client", re.I)
+EXPLORE_LIMIT = 25
+MENTIONED_PATH = re.compile(r"""["'`(=](/a/[A-Za-z0-9_/.\-]+)""")
+LINKED_PATH = re.compile(r"""(?:href|src|data-href|data-url)=["'](/a/[^"'#?\s]+)""")
 
 
 class ProbeError(Exception):
@@ -123,6 +141,10 @@ def parse_forms(html: str) -> list[Form]:
     return parser.forms
 
 
+def has_password_form(html: str) -> bool:
+    return any("Password" in form.fields for form in parse_forms(html))
+
+
 def text_by_id(html: str, element_id: str) -> str:
     match = re.search(rf'id="{re.escape(element_id)}"[^>]*>(.*?)</', html, re.S)
     return re.sub(r"<[^>]+>|\s+", " ", match.group(1)).strip() if match else ""
@@ -150,6 +172,29 @@ def loads_or_empty(text: str | None) -> Any:
         return {}
 
 
+def kind_of(response: httpx.Response) -> str:
+    return response.headers.get("content-type", "?").split(";")[0].strip()
+
+
+def describe(response: httpx.Response) -> str:
+    kind = kind_of(response)
+    title = re.search(r"<title[^>]*>(.*?)</title>", response.text, re.S | re.I) if "html" in kind else None
+    scripts = len(re.findall(r"<script", response.text, re.I)) if "html" in kind else 0
+    text = f"{response.status_code} {kind} {len(response.content)}B"
+    if title:
+        text += f" 标题「{title.group(1).strip()[:40]}」"
+    if scripts:
+        text += f" {scripts} 个脚本"
+    return text
+
+
+def render_url(url: str) -> str:
+    """主机 + 路径 + 参数名；参数值不进报告。"""
+    parts = urlsplit(url)
+    names = ",".join(name for name, _ in parse_qsl(parts.query, keep_blank_values=True))
+    return f"{parts.netloc}{parts.path}" + (f"?{{{names}}}" if names else "")
+
+
 @dataclass
 class Hop:
     method: str
@@ -162,12 +207,7 @@ class Hop:
     note: str = ""
 
     def render(self, index: int) -> str:
-        parts = urlsplit(self.url)
-        query = ",".join(name for name, _ in parse_qsl(parts.query, keep_blank_values=True))
-        line = f"{index:>3}  {self.status} {self.method:<4} {parts.netloc}{parts.path}"
-        if query:
-            line += f"?{{{query}}}"
-        line += f"  {self.elapsed_ms:.0f}ms"
+        line = f"{index:>3}  {self.status} {self.method:<4} {render_url(self.url)}  {self.elapsed_ms:.0f}ms"
         if self.server:
             line += f"  server={self.server}"
         if self.skew_s is not None:
@@ -180,15 +220,19 @@ class Hop:
 
 
 class Probe:
-    def __init__(self) -> None:
+    def __init__(self, pages_dir: str = "") -> None:
         self.client = httpx.Client(
             headers={"User-Agent": USER_AGENT, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"},
             follow_redirects=False,
             timeout=20,
         )
+        self.pages_dir = pages_dir
         self.lines: list[str] = []
         self.hop_count = 0
+        self.page_count = 0
         self.csrf = ""
+        self._user = ""
+        self._password = ""
 
     def say(self, text: str = "") -> None:
         print(text)
@@ -197,6 +241,20 @@ class Probe:
     def section(self, title: str) -> None:
         self.say()
         self.say(f"== {title}")
+
+    def keep(self, response: httpx.Response) -> None:
+        """把页面原文存到本机，供之后分析表单结构。"""
+        if not self.pages_dir:
+            return
+        os.makedirs(self.pages_dir, exist_ok=True)
+        kind = kind_of(response)
+        ext = next((e for e, mark in (("html", "html"), ("json", "json"), ("js", "javascript")) if mark in kind), "txt")
+        stem = re.sub(r"[^A-Za-z0-9._-]+", "_", urlsplit(str(response.url)).path.strip("/"))[:80] or "root"
+        self.page_count += 1
+        name = f"{self.page_count:02d}_{stem}" + ("" if stem.endswith(f".{ext}") else f".{ext}")
+        with open(os.path.join(self.pages_dir, name), "w", encoding="utf-8") as fh:
+            fh.write(response.text)
+        self.say(f"     ↳ 原文存为 {name}")
 
     def request(self, method: str, url: str, *, data: dict[str, str] | None = None, json_body: Any = None,
                 headers: dict[str, str] | None = None, note: str = "") -> httpx.Response:
@@ -241,7 +299,7 @@ class Probe:
             if response.status_code in (307, 308):
                 return response.request.method, target, dict(parse_qsl(response.request.content.decode())), ""
             return "GET", target, None, ""
-        if response.status_code != 200 or "html" not in response.headers.get("content-type", ""):
+        if response.status_code != 200 or "html" not in kind_of(response):
             return None
         html = response.text
         refresh = re.search(r'http-equiv=["\']?refresh["\']?[^>]*content=["\']?\d+;\s*url=([^"\'>\s]+)', html, re.I)
@@ -290,8 +348,16 @@ class Probe:
         self.say(f"   停在 {final.url.host}{final.url.path}（{describe(final)}）")
 
     def login(self, user: str, password: str) -> httpx.Response:
+        self._user, self._password = user, password
         self.section("2. ADFS 登录页")
         page = self.walk("GET", ADFS_AUTHORIZE)
+        self.section("3. 提交凭据，跟随回跳")
+        final = self._submit_adfs(page)
+        self.say(f"   停在 {final.url.host}{final.url.path}（{describe(final)}）")
+        return final
+
+    def _submit_adfs(self, page: httpx.Response) -> httpx.Response:
+        """把凭据提交给 ADFS 登录表单；提交地址不是 sts 就拒绝发出密码。"""
         form = next((f for f in parse_forms(page.text) if "Password" in f.fields), None)
         if form is None:
             raise ProbeError(f"登录页里没有密码表单（{describe(page)}）")
@@ -299,11 +365,9 @@ class Probe:
         if urlsplit(action).scheme != "https" or urlsplit(action).hostname != ADFS_HOST:
             raise ProbeError("登录表单的提交地址不是 sts.cuhk.edu.cn，已中止，密码没有发出")
         self.say(f"   表单 #{form.id} 字段：{', '.join(form.fields)}")
-
-        self.section("3. 提交凭据，跟随回跳")
         payload = {name: value for name, (_, value) in form.fields.items()}
-        payload["UserName"] = user if re.search(r"[@\\]", user) else f"{ADFS_DOMAIN}\\{user}"
-        payload["Password"] = password
+        payload["UserName"] = self._user if re.search(r"[@\\]", self._user) else f"{ADFS_DOMAIN}\\{self._user}"
+        payload["Password"] = self._password
         payload["Kmsi"] = "true"
         final = self.walk("POST", action, payload)
         if final.url.host == ADFS_HOST:
@@ -312,7 +376,6 @@ class Probe:
                 raise ProbeError(f"ADFS 要求额外验证（页面含 {', '.join(markers)}），纯 HTTP 登录不可行")
             reason = text_by_id(final.text, "errorText") or text_by_id(final.text, "errorTextPassword")
             raise ProbeError(f"ADFS 没有放行：{reason or describe(final)}")
-        self.say(f"   停在 {final.url.host}{final.url.path}（{describe(final)}）")
         return final
 
     def finish_atrust(self, landing: httpx.Response) -> None:
@@ -350,44 +413,110 @@ class Probe:
                 raise ProbeError(f"aTrust {service} 没有通过：code={result.get('code')!r} message={result.get('message')!r}")
             service = (result.get("data") or {}).get("nextService") or ""
 
-        self.atrust("GET", "/passport/v1/user/onlineInfo")
-
     def enter_booking(self) -> bool:
-        self.section("5. 带着会话回到预订系统")
-        final = self.walk("GET", BOOKING)
-        self.say(f"   停在 {final.url.host}{final.url.path}（{describe(final)}）")
-        if final.url.host != urlsplit(BOOKING).hostname:
+        self.section("5. 穿过网关进入预订系统")
+        landing = self.walk("GET", BOOKING)
+        self.say(f"   停在 {landing.url.host}{landing.url.path}（{describe(landing)}）")
+        if landing.url.host != BOOKING_HOST:
             return False
+        self.keep(landing)
 
-        self.section("6. 已登录页面的结构（只读，只发 GET）")
-        home = self.walk("GET", BOOKING_HOME)
-        self.say(f"   {describe(home)}")
-        if home.url.host != urlsplit(BOOKING).hostname or home.status_code != 200:
+        self.section("6. 预订系统自身的登录")
+        home = self._app_home()
+        if home is None:
+            home = self._app_login(landing)
+        if home is None:
+            self.say("   没有找到能登录预订系统的入口")
             return False
+        self.say("   预订系统已登录")
+
+        self.section("7. 已登录页面的结构（只读，只发 GET）")
+        self._explore(home)
+        return True
+
+    def _app_home(self) -> httpx.Response | None:
+        """已登录时主页直接返回 200；未登录会被重定向回落地页。"""
+        response = self.request("GET", BOOKING_HOME)
+        return response if response.status_code == 200 else None
+
+    def _scripts_of(self, page: httpx.Response, seen: set[str]) -> list[httpx.Response]:
+        """抓取页面引用的、预订系统自己的脚本（跳过通用库）。"""
+        fetched = []
+        for src in re.findall(r'<script[^>]+src=["\']?([^"\'\s>]+)', page.text, re.I):
+            url = urljoin(str(page.url), src)
+            key = urlsplit(url)._replace(query="", fragment="").geturl()
+            if urlsplit(url).hostname != BOOKING_HOST or LIBRARY_SCRIPT.search(key) or key in seen:
+                continue
+            if len(seen) >= SCRIPT_LIMIT:
+                break
+            seen.add(key)
+            script = self.request("GET", url)
+            self.keep(script)
+            fetched.append(script)
+        return fetched
+
+    def _app_login(self, landing: httpx.Response) -> httpx.Response | None:
+        """在落地页和它的脚本里找登录入口，逐个试到主页能打开为止。"""
+        candidates: list[str] = []
+        for source in [landing, *self._scripts_of(landing, set())]:
+            for raw in LOGIN_URL.findall(source.text):
+                url = urljoin(str(source.url), raw)
+                if "/" not in raw or re.search(r"[${+]", raw) or STATIC_EXT.search(urlsplit(url).path):
+                    continue
+                if UNSAFE_PATH.search(urlsplit(url).path) or url in candidates:
+                    continue
+                candidates.append(url)
+        candidates += [url for guess in LOGIN_GUESSES if (url := urljoin(BOOKING, guess)) not in candidates]
+        self.say(f"   候选登录入口 {len(candidates)} 个：{' '.join(render_url(u) for u in candidates)}")
+
+        for url in candidates[:LOGIN_TRIES]:
+            try:
+                final = self.walk("GET", url)
+                if final.url.host == ADFS_HOST and has_password_form(final.text):
+                    self.say("   ADFS 没有自动放行，重新提交凭据")
+                    self._submit_adfs(final)
+            except ProbeError as exc:
+                self.say(f"     ↳ 放弃这个入口：{exc}")
+                continue
+            home = self._app_home()
+            if home is not None:
+                self.say(f"   有效入口：{render_url(url)}")
+                return home
+        return None
+
+    def _explore(self, home: httpx.Response) -> None:
         seen = {urlsplit(BOOKING_HOME).path}
-        queue = self._report_page(home)
+        scripts_seen: set[str] = set()
+        pending = self._report_page(home, scripts_seen)
         visited = 0
-        while queue and visited < EXPLORE_LIMIT:
-            path = queue.pop(0)
+        while pending and visited < EXPLORE_LIMIT:
+            path = pending.pop(0)
             if path in seen:
                 continue
             seen.add(path)
             visited += 1
             page = self.request("GET", urljoin(BOOKING, path))
             self.say(f"     ↳ {describe(page)}")
-            if page.status_code == 200 and "html" in page.headers.get("content-type", ""):
-                queue.extend(p for p in self._report_page(page) if p not in seen)
-            elif "json" in page.headers.get("content-type", ""):
+            if page.status_code != 200:
+                continue
+            if "html" in kind_of(page):
+                pending.extend(p for p in self._report_page(page, scripts_seen) if p not in seen)
+            elif "json" in kind_of(page):
+                self.keep(page)
                 self.say(f"     ↳ {shape(loads_or_empty(page.text))}")
-        return True
 
-    def _report_page(self, page: httpx.Response) -> list[str]:
-        """列出页面里的 /a/ 路径和表单字段，返回值得继续只读访问的路径。"""
-        paths = sorted(set(re.findall(r'["\'(=](/a/[A-Za-z0-9_/.\-]+)', page.text)))
-        self.say(f"     /a/ 路径 {len(paths)} 个：{' '.join(paths[:60])}")
+    def _report_page(self, page: httpx.Response, scripts_seen: set[str]) -> list[str]:
+        """记录页面里的路径和表单字段，返回值得继续只读访问的路径。"""
+        self.keep(page)
+        texts = [page.text] + [script.text for script in self._scripts_of(page, scripts_seen)]
+        mentioned = sorted({path for text in texts for path in MENTIONED_PATH.findall(text)})
+        self.say(f"     提到的 /a/ 路径 {len(mentioned)} 个：{' '.join(mentioned[:80])}")
         for found in parse_forms(page.text):
             self.say(f"     表单 #{found.id or '?'} {found.method} → {urlsplit(found.action).path}: {found.describe_fields()}")
-        return [p for p in paths if EXPLORE_PATH.search(p) and not UNSAFE_PATH.search(p) and "." not in p.rsplit("/", 1)[-1]]
+        linked = LINKED_PATH.findall(page.text)
+        worth = [p for p in mentioned if EXPLORE_PATH.search(p)]
+        return [p for p in dict.fromkeys(linked + worth)
+                if not UNSAFE_PATH.search(p) and not STATIC_EXT.search(p)]
 
     def cookies(self) -> None:
         self.section("会话 Cookie（只列属性，不含取值）")
@@ -399,42 +528,30 @@ class Probe:
             self.say(f"   {cookie.domain:<24} {cookie.name:<28} path={cookie.path:<10} 有效期={life:<8} {' '.join(flags)}")
 
 
-def describe(response: httpx.Response) -> str:
-    kind = response.headers.get("content-type", "?").split(";")[0]
-    title = re.search(r"<title[^>]*>(.*?)</title>", response.text, re.S | re.I) if "html" in kind else None
-    scripts = len(re.findall(r"<script", response.text, re.I)) if "html" in kind else 0
-    text = f"{response.status_code} {kind} {len(response.content)}B"
-    if title:
-        text += f" 标题「{title.group(1).strip()[:40]}」"
-    if scripts:
-        text += f" {scripts} 个脚本"
-    return text
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="探测 MUS Booking 的登录链路")
     parser.add_argument("--anonymous", action="store_true", help="只测连通性，不登录")
     parser.add_argument("--report", default="probe-report.txt", help="报告输出路径")
+    parser.add_argument("--pages", default="probe-pages", help="页面原文的保存目录；传空字符串则不保存")
     args = parser.parse_args()
 
-    probe = Probe()
+    probe = Probe(pages_dir=args.pages)
     verdict = ""
     try:
         probe.environment()
         probe.anonymous()
         if args.anonymous:
             page = probe.walk("GET", ADFS_AUTHORIZE)
-            reachable = any("Password" in f.fields for f in parse_forms(page.text))
             probe.atrust("GET", "/passport/v1/public/authConfig", params={"mod": "1"})
-            verdict = "匿名连通正常，ADFS 登录页可达" if reachable else "ADFS 登录页异常，没有找到密码表单"
+            verdict = ("匿名连通正常，ADFS 登录页可达" if has_password_form(page.text)
+                       else "ADFS 登录页异常，没有找到密码表单")
         else:
             user = input("\n学号：").strip()
             password = getpass.getpass("密码（不回显，只发往 sts.cuhk.edu.cn）：")
             landing = probe.login(user, password)
             probe.finish_atrust(landing)
-            ok = probe.enter_booking()
-            verdict = ("纯 HTTP 登录走通了，服务器上不需要浏览器" if ok
-                       else "登录后没能进入预订系统，卡住的位置见上面最后几跳")
+            verdict = ("纯 HTTP 登录全程走通，包括预订系统自身的登录" if probe.enter_booking()
+                       else "网关已通过，但没能登录预订系统，卡住的位置见上面最后几跳")
     except ProbeError as exc:
         verdict = f"中止：{exc}"
     except KeyboardInterrupt:
