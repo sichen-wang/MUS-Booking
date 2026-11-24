@@ -27,16 +27,22 @@ def _admin(request: Request) -> Visitor:
 
 
 @router.get("/enter/{token}")
+async def enter_page(request: Request, token: str) -> Response:
+    """管理链接先显示一个按钮，点了才生效。聊天软件生成链接预览时只会 GET，不会把它用掉。"""
+    return render(request, "admin_enter.html", token=token)
+
+
+@router.post("/enter/{token}")
 async def enter(request: Request, token: str) -> Response:
     store, now = services(request).store, now_of(request)
     if not store.redeem_admin_link(token, now):
         raise HTTPException(404)
     current = visitor(request)
-    response = go(request, "/admin")
+    member_id = current.member.id if current and current.member else None
     if current is not None:
-        store.update_session(current.token, admin=True)
-    else:
-        set_session(request, response, store.create_session(None, now, admin=True))
+        store.drop_session(current.token)
+    response = go(request, "/admin")
+    set_session(request, response, store.create_session(member_id, now, admin=True))
     return response
 
 

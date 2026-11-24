@@ -1,0 +1,30 @@
+[Unit]
+Description=MUS Booking
+After=network-online.target time-sync.target
+Wants=network-online.target time-sync.target
+
+[Service]
+Type=simple
+User=mus-booking
+Group=mus-booking
+WorkingDirectory=/opt/mus-booking
+EnvironmentFile=/etc/mus-booking/env
+ExecStart=/opt/mus-booking/.venv/bin/mus-booking serve --host 127.0.0.1 --port 8000 --root-path /booking
+Restart=always
+RestartSec=3
+
+StateDirectory=mus-booking
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mus-booking
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

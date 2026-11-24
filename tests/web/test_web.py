@@ -43,7 +43,9 @@ class World:
         self.store = Store.open(":memory:", Vault(Fernet.generate_key()))
         engine = Engine(self.store, self.clock, self.fake.school)
         self.app = create_app(Services(self.store, engine, self.clock, self.fake.school), run_engine=False)
-        self.client = TestClient(self.app, root_path=root_path, base_url="http://testserver")
+        self.client = TestClient(
+            self.app, root_path=root_path, base_url="http://testserver", headers={"Origin": "http://testserver"}
+        )
 
     def invite(self) -> str:
         return self.store.create_invite(NOW)
@@ -57,7 +59,7 @@ class World:
         return client
 
     def new_client(self) -> TestClient:
-        return TestClient(self.app, base_url="http://testserver")
+        return TestClient(self.app, base_url="http://testserver", headers={"Origin": "http://testserver"})
 
 
 @pytest.fixture
@@ -97,6 +99,7 @@ def test_binding_signs_in_and_uses_up_the_invite(world):
         ({"code": "ZZZZ", "student_id": "123000001", "password": "right"}, "邀请码无效"),
         ({"student_id": "123000001", "password": "wrong"}, "学号或密码不对"),
         ({"student_id": "", "password": "right"}, "请填写学号"),
+        ({"student_id": "cuhksz\123000001", "password": "right"}, "学号只能填数字"),
         ({"student_id": "123000001", "password": "right", "phone": "abc"}, "电话只能填数字"),
     ],
 )
@@ -249,19 +252,22 @@ def test_the_admin_page_is_hidden_without_the_admin_flag(world):
     assert world.client.post("/admin/invites").status_code == 404
 
 
-def test_an_admin_link_works_once(world):
+def test_an_admin_link_works_once_and_only_after_the_button(world):
     token = world.store.create_admin_link(NOW)
     admin = world.new_client()
-    assert admin.get(f"/admin/enter/{token}").status_code == 200
+    preview = admin.get(f"/admin/enter/{token}")  # 聊天软件的链接预览只会 GET
+    assert "进入管理页" in preview.text
+    assert admin.get("/admin").status_code == 404
+    assert admin.post(f"/admin/enter/{token}").status_code == 200
     page = admin.get("/admin")
-    assert page.status_code == 200 and "邀请码" in page.text
-    assert world.new_client().get(f"/admin/enter/{token}").status_code == 404
+    assert page.status_code == 200 and "邀请码" in page.text and "退出" in page.text
+    assert world.new_client().post(f"/admin/enter/{token}").status_code == 404
 
 
 def test_admins_generate_invites_and_remove_members(world):
     world.bind()
     admin = world.new_client()
-    admin.get(f"/admin/enter/{world.store.create_admin_link(NOW)}")
+    admin.post(f"/admin/enter/{world.store.create_admin_link(NOW)}")
     admin.post("/admin/invites")
     codes = [invite.code for invite in world.store.invites() if invite.usable]
     assert len(codes) == 1
@@ -276,6 +282,73 @@ def test_admins_generate_invites_and_remove_members(world):
 def test_posts_from_other_sites_are_refused(world):
     response = world.client.post("/login", data={}, headers={"Origin": "https://evil.example"})
     assert response.status_code == 403
+    bare = TestClient(world.app, base_url="http://testserver")
+    assert bare.post("/login", data={}).status_code == 403
+    referred = bare.post("/login", data={"student_id": "1"}, headers={"Referer": "http://testserver/login"})
+    assert referred.status_code == 200
+
+
+def test_signing_in_replaces_the_session_token(world):
+    world.client.get("/")
+    world.bind()
+    first = world.client.cookies.get("mb_session")
+    world.client.post("/login", data={"student_id": "123000001", "password": "right"})
+    second = world.client.cookies.get("mb_session")
+    assert first and second and first != second
+    assert world.store.session(first, NOW) is None
+
+
+def test_skipping_is_limited_to_the_coming_week(world):
+    world.bind()
+    add(world.client, TODAY + timedelta(days=1), weekly=True)
+    (booking,) = world.store.schedule(1).bookings
+    far = TODAY + timedelta(days=15)
+    response = world.client.post(f"/b/{booking.id}/{far}/skip")
+    assert "这一次不能跳过" in response.text
+    assert world.store.schedule(1).skips == frozenset()
+
+
+def test_a_skipped_day_turned_into_a_one_off_is_checked_for_overlap(world):
+    world.bind()
+    day = TODAY + timedelta(days=2)
+    add(world.client, day, "13:00", "15:00", weekly=True)
+    (series,) = world.store.schedule(1).bookings
+    world.client.post(f"/b/{series.id}/{day}/skip")
+    add(world.client, day, "13:00", "15:00", room="room322")
+    response = world.client.post(
+        f"/b/{series.id}/{day}/edit", data={"day": day.isoformat(), "start": "14:00", "end": "16:00", "room": "room327"}
+    )
+    assert "时间与已有的预定重叠" in response.text
+
+
+def test_the_retired_part_of_a_split_series_is_history_only(world):
+    world.bind()
+    series = world.store.put_booking(Booking(1, "room327", Span.parse("19:00", "21:00"), TODAY, weekly=True), NOW)
+    (segment,) = world.store.claim(1, series, TODAY, [Span.parse("19:00", "21:00")], "room327", "MPC327", NOW)
+    world.store.settle(segment, Outcome.BOOKED, "保存成功", NOW)
+    world.client.post(
+        f"/b/{series}/{TODAY}/edit",
+        data={"day": TODAY.isoformat(), "start": "18:00", "end": "20:00", "room": "room327", "weekly": "on"},
+    )
+    old = world.client.get(f"/b/{series}/{TODAY}")
+    assert "预定成功" in old.text and "删除" not in old.text
+    world.client.post(f"/b/{series}/{TODAY}/delete")
+    assert len(world.store.schedule(1).bookings) == 2
+
+
+def test_malformed_times_are_reported_not_crashed(world):
+    world.bind()
+    response = add(world.client, TODAY + timedelta(days=1), "7pm", "21:00")
+    assert response.status_code == 200 and "请选择时间" in response.text
+
+
+def test_polling_does_not_leak_into_the_day_links(world):
+    world.bind()
+    world.client.post("/add", data={"day": TODAY.isoformat(), "start": "19:00", "end": "21:00", "room": "room327"})
+    home = world.client.get("/")
+    assert "预定中" in home.text
+    section = re.search(r'<section id="days"[^>]*>', home.text).group(0)
+    assert "hx-select" not in section
 
 
 def test_htmx_posts_navigate_with_hx_location(world):

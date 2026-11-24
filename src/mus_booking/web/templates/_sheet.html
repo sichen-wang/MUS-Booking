@@ -46,7 +46,7 @@
 
     {% if sheet.can_edit %}
     <div class="actions">
-      {% if state == 'planned' and i.weekly %}
+      {% if state == 'planned' and i.weekly and sheet.can_skip %}
       <form method="post" hx-push-url="false" action="{{ u(sheet.path ~ '/skip') }}"><button class="action">{{ icon('skip') }}<span>跳过这一次</span></button></form>
       {% elif state == 'skipped' %}
       <form method="post" hx-push-url="false" action="{{ u(sheet.path ~ '/unskip') }}"><button class="action accent">{{ icon('undo') }}<span>恢复这一次</span></button></form>

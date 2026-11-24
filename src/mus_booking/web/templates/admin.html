@@ -8,7 +8,11 @@
     <span class="brand-name">MUS Booking</span>
     <span class="tag">管理</span>
     <span class="spacer"></span>
-    {% if has_member %}<a class="admin-back" href="{{ u('/') }}">回到我的预定</a>{% endif %}
+    {% if has_member %}
+    <a class="admin-back" href="{{ u('/') }}">回到我的预定</a>
+    {% else %}
+    <form method="post" hx-push-url="false" action="{{ u('/logout') }}"><button class="small" type="submit">退出</button></form>
+    {% endif %}
   </header>
 
   <section class="overview">

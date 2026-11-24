@@ -26,8 +26,10 @@ class Refused(Exception):
 
 def clean_student_id(text: str) -> str:
     value = re.sub(r"\s+", "", text or "")
-    if not value or len(value) > 40:
+    if not value:
         raise Refused("请填写学号")
+    if not re.fullmatch(r"\d{5,12}", value):
+        raise Refused("学号只能填数字")
     return value
 
 
@@ -80,7 +82,9 @@ async def bind(
         cookies = school.cookies()
         await school.aclose()
     with store.transaction():
-        if store.member_by_student(student_id):
+        if store.member_by_student(student_id) or any(
+            (other := store.profile(m.id)) is not None and other.user_id == profile.user_id for m in store.members()
+        ):
             raise Refused("这个学号已经绑定过，请直接登录")
         member = store.add_member(student_id, profile.name, phone, password, cookies, now)
         if not store.bind_invite(code, member, now):
@@ -117,10 +121,14 @@ async def refresh_credentials(store: Store, connect: Connect, now: datetime, mem
 
 def _span(profile: Profile, start: str, end: str) -> Span:
     try:
-        span = Span.parse(start, end)
+        begin, finish = parse_hhmm(start), parse_hhmm(end)
     except ValueError as error:
-        if start and end and parse_hhmm(end) <= parse_hhmm(start):
-            raise Refused("结束要晚于开始") from error
+        raise Refused("请选择时间") from error
+    if finish <= begin:
+        raise Refused("结束要晚于开始")
+    try:
+        span = Span(begin, finish)
+    except ValueError as error:
         raise Refused("请选择时间") from error
     if span.start < profile.day_start or span.end > profile.day_end:
         raise Refused("不在可预定的时间范围内")
@@ -143,10 +151,20 @@ def _room(profile: Profile, room: str) -> str:
     return room
 
 
-def _check(store: Store, member_id: int, candidate: Booking, now: datetime, *, replacing: Iterable[Booking] = ()):
+def _check(
+    store: Store,
+    member_id: int,
+    candidate: Booking,
+    now: datetime,
+    *,
+    replacing: Iterable[Booking] = (),
+    skips: set[tuple[int, date]] | None = None,
+) -> None:
     if candidate.first == now.date() and candidate.span.starts_on(candidate.first) <= now:
         raise Refused("开始时间已过")
     trial = store.schedule(member_id).with_bookings(*replacing, replace(candidate, id=candidate.id or -1))
+    if skips is not None:
+        trial = trial.with_skips(skips)
     problem = trial.problem(candidate.id or -1, now)
     if problem:
         raise Refused(problem)
@@ -183,7 +201,7 @@ def edit_booking(
 ) -> None:
     schedule = store.schedule(member_id)
     old = schedule.booking(booking_id)
-    if old is None:
+    if old is None or old.last is not None:
         raise Refused("这条预定已经不存在")
     wanted = Booking(
         member_id, _room(profile, room), _span(profile, start, end), parse_day(day, now.date()), weekly=weekly
@@ -192,8 +210,11 @@ def edit_booking(
         kept, new = revise(schedule, old, wanted)
     except Frozen as error:
         raise Refused("这一次已经提交，不能再改") from error
-    _check(store, member_id, new, now, replacing=[kept] if kept else [])
     stale, moved = rehomed_skips(schedule, old, kept, new)
+    probe_id = new.id or -1
+    skips = {(owner, day) for owner, day in schedule.skips if not (owner == old.id and day in stale)}
+    skips |= {(probe_id, day) for day in moved}
+    _check(store, member_id, new, now, replacing=[kept] if kept else [], skips=skips)
     with store.transaction():
         if kept:
             store.put_booking(kept, now)
@@ -206,7 +227,7 @@ def edit_booking(
 def delete_booking(store: Store, member_id: int, now: datetime, booking_id: int) -> None:
     schedule = store.schedule(member_id)
     old = schedule.booking(booking_id)
-    if old is None:
+    if old is None or old.last is not None:
         return
     try:
         kept = retire(schedule, old)
@@ -218,9 +239,10 @@ def delete_booking(store: Store, member_id: int, now: datetime, booking_id: int)
         store.put_booking(kept, now)
 
 
-def skip(store: Store, member_id: int, booking_id: int, day: date) -> None:
+def skip(store: Store, member_id: int, now: datetime, booking_id: int, day: date) -> None:
     occurrence = store.schedule(member_id).find(booking_id, day)
-    if occurrence is None or occurrence.state is not State.PLANNED or not occurrence.booking.weekly:
+    within = now.date() <= day < now.date() + timedelta(days=HORIZON)
+    if occurrence is None or occurrence.state is not State.PLANNED or not occurrence.booking.weekly or not within:
         raise Refused("这一次不能跳过")
     store.skip(booking_id, day)
 
@@ -241,7 +263,7 @@ def unskip(store: Store, member_id: int, now: datetime, booking_id: int, day: da
 def set_paused(store: Store, member_id: int, now: datetime, booking_id: int, paused: bool) -> None:
     schedule = store.schedule(member_id)
     booking = schedule.booking(booking_id)
-    if booking is None or not booking.weekly or booking.paused == paused:
+    if booking is None or not booking.weekly or booking.last is not None or booking.paused == paused:
         return
     updated = replace(booking, paused=paused)
     if not paused and (problem := schedule.with_bookings(updated).problem(booking_id, now)):

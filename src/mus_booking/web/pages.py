@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
-from ..domain import State, hhmm, open_at, ranked
+from ..domain import HORIZON, State, hhmm, open_at, ranked
 from ..portal import Profile
 from ..store import Member, Session
 from . import actions, views
@@ -62,11 +62,12 @@ def _client(request: Request) -> str:
 
 
 def _start_session(request: Request, member_id: int, response: Response, current: Visitor | None) -> Response:
+    """登录或绑定之后换发一个新的会话，旧的作废，以免事先拿到旧令牌的人跟着登录。"""
     store, now = services(request).store, now_of(request)
+    admin = current.session.admin if current else False
     if current is not None:
-        store.update_session(current.token, member_id=member_id)
-    else:
-        set_session(request, response, store.create_session(member_id, now))
+        store.drop_session(current.token)
+    set_session(request, response, store.create_session(member_id, now, admin=admin))
     return response
 
 
@@ -309,7 +310,9 @@ def _detail(request: Request, current: Visitor, occurrence, error: str = "") -> 
         "open_now": now >= open_at(occurrence.day),
         "segments": views.segment_rows(occurrence.segments),
         "path": f"/b/{booking.id}/{occurrence.day}",
-        "can_edit": not (occurrence.state is State.SUBMITTED and not booking.weekly),
+        # 单次预定提交之后、以及修改时被截短的旧预定，都只显示结果
+        "can_edit": booking.last is None and not (occurrence.state is State.SUBMITTED and not booking.weekly),
+        "can_skip": now.date() <= occurrence.day < now.date() + timedelta(days=HORIZON),
         "error": error,
     }
     return _home(request, current, sheet)
@@ -365,7 +368,7 @@ async def act(request: Request, booking_id: int, day: str, verb: str) -> Respons
     svc, now, member_id = services(request), now_of(request), current.member.id
     try:
         if verb == "skip":
-            actions.skip(svc.store, member_id, booking_id, occurrence.day)
+            actions.skip(svc.store, member_id, now, booking_id, occurrence.day)
         elif verb == "unskip":
             actions.unskip(svc.store, member_id, now, booking_id, occurrence.day)
         elif verb == "pause":

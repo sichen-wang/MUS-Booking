@@ -1,0 +1,7 @@
+# 加进服务器上已有的站点块（例如 13.140.76.154 { ... }）里，然后重新加载 Caddy。
+# 证书由这个站点块原有的配置负责，这里不需要再申请。
+
+redir /booking /booking/ 308
+handle_path /booking/* {
+	reverse_proxy 127.0.0.1:8000
+}

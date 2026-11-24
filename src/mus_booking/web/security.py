@@ -43,8 +43,8 @@ class SameOrigin:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and scope["method"] not in ("GET", "HEAD", "OPTIONS"):
             headers = {key.decode().lower(): value.decode() for key, value in scope["headers"]}
-            origin = headers.get("origin")
-            if origin and origin != "null" and urlsplit(origin).netloc != headers.get("host", ""):
+            source = headers.get("origin") or headers.get("referer") or ""
+            if not source or urlsplit(source).netloc != headers.get("host", ""):
                 await PlainTextResponse("Forbidden", status_code=403)(scope, receive, send)
                 return
         await self.app(scope, receive, send)
