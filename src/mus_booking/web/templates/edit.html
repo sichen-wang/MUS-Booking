@@ -6,7 +6,7 @@
   <a class="back" href="{{ u(back) }}" aria-label="返回">{{ icon('back', 24) }}</a>
   <h1 class="title">{{ '修改预定' if editing else '添加预定' }}</h1>
 
-  <form class="booking" method="post" action="{{ u(action) }}" hx-disabled-elt="find button[type=submit]">
+  <form class="booking" method="post" hx-push-url="false" action="{{ u(action) }}" hx-disabled-elt="find button[type=submit]">
     <div class="label">日期</div>
     <div class="dates" role="radiogroup" aria-label="日期">
       {% for value, name, number in dates %}

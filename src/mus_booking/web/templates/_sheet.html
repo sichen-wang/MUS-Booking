@@ -47,19 +47,19 @@
     {% if sheet.can_edit %}
     <div class="actions">
       {% if state == 'planned' and i.weekly %}
-      <form method="post" action="{{ u(sheet.path ~ '/skip') }}"><button class="action">{{ icon('skip') }}<span>跳过这一次</span></button></form>
+      <form method="post" hx-push-url="false" action="{{ u(sheet.path ~ '/skip') }}"><button class="action">{{ icon('skip') }}<span>跳过这一次</span></button></form>
       {% elif state == 'skipped' %}
-      <form method="post" action="{{ u(sheet.path ~ '/unskip') }}"><button class="action accent">{{ icon('undo') }}<span>恢复这一次</span></button></form>
+      <form method="post" hx-push-url="false" action="{{ u(sheet.path ~ '/unskip') }}"><button class="action accent">{{ icon('undo') }}<span>恢复这一次</span></button></form>
       {% endif %}
       {% if i.weekly %}
         {% if o.booking.paused %}
-        <form method="post" action="{{ u(sheet.path ~ '/resume') }}"><button class="action accent">{{ icon('play') }}<span>恢复每周重复</span></button></form>
+        <form method="post" hx-push-url="false" action="{{ u(sheet.path ~ '/resume') }}"><button class="action accent">{{ icon('play') }}<span>恢复每周重复</span></button></form>
         {% else %}
-        <form method="post" action="{{ u(sheet.path ~ '/pause') }}"><button class="action">{{ icon('pause') }}<span>暂停每周重复</span></button></form>
+        <form method="post" hx-push-url="false" action="{{ u(sheet.path ~ '/pause') }}"><button class="action">{{ icon('pause') }}<span>暂停每周重复</span></button></form>
         {% endif %}
       {% endif %}
       <a class="action" href="{{ u(sheet.path ~ '/edit') }}">{{ icon('pen') }}<span>修改时间或琴房</span></a>
-      <form method="post" action="{{ u(sheet.path ~ '/delete') }}"><button class="action danger" data-confirm="确认删除">{{ icon('trash') }}<span>删除</span></button></form>
+      <form method="post" hx-push-url="false" action="{{ u(sheet.path ~ '/delete') }}"><button class="action danger" data-confirm="确认删除">{{ icon('trash') }}<span>删除</span></button></form>
     </div>
     {% endif %}
   </section>

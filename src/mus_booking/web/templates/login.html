@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block title %}登录 · MUS Booking{% endblock %}
-{% block body_class %}entry{% endblock %}
 {% block body %}
 <main class="page entry-page">
   <div class="brand">
@@ -9,7 +8,7 @@
   </div>
   <h1 class="hero">登录</h1>
 
-  <form class="fields" method="post" action="{{ u('/login') }}" hx-disabled-elt="find button">
+  <form class="fields" method="post" hx-push-url="false" action="{{ u('/login') }}" hx-disabled-elt="find button">
     <label class="field">
       <span class="field-label">学号</span>
       <input name="student_id" value="{{ values.get('student_id', '') }}" inputmode="numeric" autocomplete="username" required>

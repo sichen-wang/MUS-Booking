@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
 {% block title %}管理 · MUS Booking{% endblock %}
-{% block body_class %}wide{% endblock %}
 {% block body %}
 <main class="admin">
   <header class="admin-bar">
@@ -38,7 +37,7 @@
               {%- if r.failed %}<span class="tone-fail">{{ r.failed }} 个时段预定失败</span>{% endif %}
             {%- else %}<span class="muted">—</span>{% endif %}</td>
             <td class="actions-cell">
-              <form method="post" action="{{ u('/admin/members/%d/remove' % r.member.id) }}"><button class="small" data-confirm="确认移除">移除</button></form>
+              <form method="post" hx-push-url="false" action="{{ u('/admin/members/%d/remove' % r.member.id) }}"><button class="small" data-confirm="确认移除">移除</button></form>
             </td>
           </tr>
           {% endfor %}
@@ -54,7 +53,7 @@
     <section class="card panel">
       <div class="panel-head">
         <h2>邀请码</h2>
-        <form method="post" action="{{ u('/admin/invites') }}"><button class="solid">生成邀请码</button></form>
+        <form method="post" hx-push-url="false" action="{{ u('/admin/invites') }}"><button class="solid">生成邀请码</button></form>
       </div>
       {% for invite, note in invites %}
       <div class="invite{% if not invite.usable %} used{% endif %}">
@@ -64,7 +63,7 @@
         </div>
         {% if invite.usable %}
         <button class="small" type="button" data-copy="{{ invite_url }}{{ invite.code }}">{{ icon('copy', 14) }}<span>复制链接</span></button>
-        <form method="post" action="{{ u('/admin/invites/%s/void' % invite.code) }}"><button class="small danger">作废</button></form>
+        <form method="post" hx-push-url="false" action="{{ u('/admin/invites/%s/void' % invite.code) }}"><button class="small danger">作废</button></form>
         {% endif %}
       </div>
       {% else %}

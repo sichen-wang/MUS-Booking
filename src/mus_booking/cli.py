@@ -123,10 +123,10 @@ def _preview(args: argparse.Namespace) -> int:
 
     services, links = build()
     base = f"http://127.0.0.1:{args.port}"
-    print("预览已准备好：")
+    print("预览已准备好：", flush=True)
     print(f"  成员首页   {base}{links['member']}")
     print(f"  管理页     {base}{links['admin']}")
-    print(f"  绑定新账号 {base}{links['invite']}（学号 / 密码：{links['newcomer']}）")
+    print(f"  绑定新账号 {base}{links['invite']}（学号 / 密码：{links['newcomer']}）", flush=True)
     uvicorn.run(create_app(services), host="127.0.0.1", port=args.port, access_log=False, log_config=None)
     return 0
 

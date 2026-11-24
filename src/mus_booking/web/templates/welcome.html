@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% from "_icons.html" import icon %}
-{% block body_class %}entry{% endblock %}
 {% block body %}
 <main class="page entry-page">
   <div class="brand">
@@ -9,7 +8,7 @@
   </div>
   <h1 class="hero">每晚 21:00，<br>替你定好琴房</h1>
 
-  <form class="fields" method="post" action="{{ u('/bind') }}" hx-disabled-elt="find button">
+  <form class="fields" method="post" hx-push-url="false" action="{{ u('/bind') }}" hx-disabled-elt="find button">
     <label class="field">
       <span class="field-label">邀请码</span>
       <input name="code" value="{{ code }}" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="8" required>

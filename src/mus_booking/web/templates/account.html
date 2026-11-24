@@ -11,7 +11,7 @@
       <span class="row-label">学号</span>
       <span class="row-value mono">{{ member.student_id }}</span>
     </div>
-    <form class="row" method="post" action="{{ u('/account/phone') }}">
+    <form class="row" method="post" hx-push-url="false" action="{{ u('/account/phone') }}">
       <label class="row-label" for="phone">电话</label>
       <input class="row-input" id="phone" name="phone" type="tel" value="{{ member.phone }}" inputmode="numeric" autocomplete="tel" placeholder="选填">
       <button class="row-button" type="submit">保存</button>
@@ -19,7 +19,7 @@
   </div>
 
   <div class="label">学校密码</div>
-  <form class="group" method="post" action="{{ u('/account/password') }}" hx-disabled-elt="find button">
+  <form class="group" method="post" hx-push-url="false" action="{{ u('/account/password') }}" hx-disabled-elt="find button">
     {% if not member.login_ok %}
     <div class="row warn">{{ icon('alert', 18) }}<span>登录失效</span></div>
     {% endif %}
@@ -36,7 +36,7 @@
   {% endif %}
 
   <div class="push"></div>
-  <form method="post" action="{{ u('/logout') }}">
+  <form method="post" hx-push-url="false" action="{{ u('/logout') }}">
     <button class="quiet danger" type="submit">退出登录</button>
   </form>
 </main>
