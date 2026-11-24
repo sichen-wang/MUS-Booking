@@ -5,9 +5,9 @@
 # ///
 """探测学校预订系统：纯 HTTP 登录，然后只读地取回预定所需的全部信息。
 
-用法（在将要部署的机器上运行）：
+学校改了系统、服务开始出错时，用它把相关页面原样抓下来分析。只测连通性用
+`mus-booking check`，不需要账号。
 
-    uv run tools/probe.py --anonymous   # 只测连通性，不需要账号
     uv run tools/probe.py               # 完整探测；没有可用会话时提示输入学号与密码
     uv run tools/probe.py --no-prompt   # 只用保存的会话，绝不提示输入密码
 
@@ -643,32 +643,25 @@ def ask_credentials() -> tuple[str, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="探测学校预订系统（只读）")
-    parser.add_argument("--anonymous", action="store_true", help="只测连通性，不登录")
     parser.add_argument("--no-prompt", action="store_true", help="只用保存的会话，绝不提示输入密码")
     parser.add_argument("--report", default="probe-report.txt", help="报告输出路径")
     parser.add_argument("--pages", default="probe-pages", help="原文的保存目录；传空字符串则不保存")
     parser.add_argument("--session", default="probe-session.json", help="会话文件；传空字符串则不读取也不保存")
     args = parser.parse_args()
 
-    probe = Probe(pages_dir=args.pages, session_path="" if args.anonymous else args.session,
+    probe = Probe(pages_dir=args.pages, session_path=args.session,
                   ask=None if args.no_prompt else ask_credentials)
     verdict = ""
     try:
         probe.environment()
         probe.reach()
-        if args.anonymous:
-            page = probe.walk("GET", ADFS_AUTHORIZE)
-            probe.atrust("GET", "/passport/v1/public/authConfig", params={"mod": "1"})
-            verdict = ("匿名连通正常，ADFS 登录页可达" if has_password_form(page.text)
-                       else "ADFS 登录页异常，没有找到密码表单")
+        home = probe.sign_in()
+        if home is None:
+            verdict = "没能登录预订系统，卡住的位置见上面最后几跳"
         else:
-            home = probe.sign_in()
-            if home is None:
-                verdict = "没能登录预订系统，卡住的位置见上面最后几跳"
-            else:
-                probe.save_session()
-                probe.discover(home)
-                verdict = "登录和只读探查都已完成"
+            probe.save_session()
+            probe.discover(home)
+            verdict = "登录和只读探查都已完成"
     except ProbeError as exc:
         verdict = f"中止：{exc}"
     except KeyboardInterrupt:

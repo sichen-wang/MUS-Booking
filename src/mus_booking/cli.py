@@ -158,7 +158,7 @@ def _check(_: argparse.Namespace) -> int:
                 except httpx.HTTPError as error:
                     passed, detail = False, f"{type(error).__name__}: {error}"
                 ok &= passed
-                print(f"{'✓' if passed else '✗'} {label}：{detail}（{time.monotonic() - started:.1f} 秒）")
+                print(f"{'通过' if passed else '失败'}  {label}：{detail}（{time.monotonic() - started:.1f} 秒）")
         return ok
 
     return 0 if asyncio.run(run()) else 1

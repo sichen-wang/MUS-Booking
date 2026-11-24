@@ -93,7 +93,7 @@ def _home(request: Request, current: Visitor, sheet: dict | None = None) -> Resp
         member=member,
         initial=views.initial(member.name, member.student_id),
         days=days,
-        next=views.next_run(days, now),
+        next=views.next_run(days, now) if member.login_ok else None,  # 登录失效时不会自动预定
         busy=views.busy(days),
         sheet=sheet,
     )
