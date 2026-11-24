@@ -105,7 +105,8 @@ GROUP = re.compile(r"refreshGrp\('([^']*)','([^']*)','([^']*)','([^']*)'\)")
 ROOM = re.compile(r"id:\s*'([0-9a-zA-Z]+)',\s*fname:\s*'([^']*)'")
 RULE = re.compile(r"saveData\?reBookMainId=[^&\"']*&ruleId=([0-9a-zA-Z]*)")
 PAGE_VAR = re.compile(r"var\s+(fbookFre\w*|fbookDur\w*|timeLimit\w*|\w*[oO]penTime\w*|\w*[aA]dvance\w*|minTime|maxTime)\s*=\s*([^;\n]{0,60})")
-PERSON_TAG = re.compile(r'name\s*=\s*"personTag";\s*\w+\.value\s*=\s*"(\w*)"')
+# 详情页上“预定”按钮的调用，例如 goBook('Student','0')：身份标签和预定类型，进入日历页时要原样带上
+GO_BOOK = re.compile(r"""onclick="goBook\('(\w*)','(\w*)'\)\"""")
 
 
 class ProbeError(Exception):
@@ -195,7 +196,7 @@ def kind_of(response: httpx.Response) -> str:
 
 
 def decoded(response: httpx.Response) -> str:
-    """预订系统的页面并不都是 UTF-8：先按 UTF-8 严格解码，不行再按 GB18030。"""
+    """按 UTF-8 解码（目前见到的响应都是 UTF-8）；万一遇到不是的，再按 GB18030 兜底。"""
     try:
         return response.content.decode("utf-8")
     except UnicodeDecodeError:
@@ -554,14 +555,18 @@ class Probe:
         details = self.booking("POST", "/a/field/client/fieldTypeDetails",
                                data={"id": type_id, "bookFlag": str(int(row.get("bookFlag") or 0))})
         self.say(f"     ↳ {describe(details)}")
-        tag = first_group(PERSON_TAG, decoded(details)) or "Student"
+        entries = list(dict.fromkeys(GO_BOOK.findall(decoded(details))))
+        self.say(f"   详情页上的预定入口（身份标签, 预定类型）：{entries or '没有找到'}")
+        if not entries:
+            return
+        tag, book_type = entries[0]
         calendar = self.booking("POST", "/a/field/client/main",
-                                data={"id": type_id, "bookType": "", "personTag": tag})
+                                data={"id": type_id, "bookType": book_type, "personTag": tag})
         text = decoded(calendar)
         rooms = list(dict.fromkeys(ROOM.findall(text)))
         rule = first_group(RULE, text)
         self.say(f"     ↳ {describe(calendar)}")
-        self.say(f"   personTag={tag} · ruleId={f'{len(rule)} 位' if rule else '没有找到'} · 琴房 {len(rooms)} 间")
+        self.say(f"   ruleId={f'{len(rule)} 位' if rule else '没有找到'} · 琴房 {len(rooms)} 间")
         self.say(f"   琴房：{'、'.join(name for _, name in rooms[:80])}")
         self.say(f"   页面顶部的用户组下拉：{len(set(GROUP.findall(text)))} 项")
         self.say(f"   “没有权限”的判断条件：{first_group(NO_PERMISSION, text).strip() or '页面里没有'}")
