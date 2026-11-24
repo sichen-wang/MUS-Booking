@@ -275,9 +275,7 @@ def retire(schedule: Schedule, old: Booking) -> Booking | None:
     return replace(old, last=frozen[-1])
 
 
-def rehomed_skips(
-    schedule: Schedule, old: Booking, kept: Booking | None, new: Booking
-) -> tuple[set[date], set[date]]:
+def rehomed_skips(schedule: Schedule, old: Booking, kept: Booking | None, new: Booking) -> tuple[set[date], set[date]]:
     """修改之后，旧预定上要删掉的跳过日期，以及要转给新预定的跳过日期。"""
     mine = {day for owner, day in schedule.skips if owner == old.id}
     if kept is None:

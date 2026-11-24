@@ -38,7 +38,7 @@ testpaths = ["tests"]
 addopts = "-q --import-mode=importlib"
 
 [tool.ruff]
-line-length = 110
+line-length = 120
 target-version = "py312"
 src = ["src", "tests"]
 extend-exclude = ["tools/probe.py"]

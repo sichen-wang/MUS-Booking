@@ -49,9 +49,7 @@ class HtmlForm:
                 result += [(control.name, value) for value in chosen]
             elif control.tag == "textarea":
                 result.append((control.name, control.value))
-            elif control.type in _UNSENT_TYPES or (
-                control.type in ("radio", "checkbox") and not control.checked
-            ):
+            elif control.type in _UNSENT_TYPES or (control.type in ("radio", "checkbox") and not control.checked):
                 continue
             else:
                 result.append((control.name, control.value))
@@ -87,9 +85,7 @@ class _FormParser(HTMLParser):
         if tag == "input":
             kind = a.get("type", "text").lower()
             value = a.get("value", "on" if kind in ("radio", "checkbox") else "")
-            self._form.controls.append(
-                Control("input", a.get("name", ""), kind, value, "checked" in a, disabled)
-            )
+            self._form.controls.append(Control("input", a.get("name", ""), kind, value, "checked" in a, disabled))
         elif tag == "select":
             self._select = Control("select", a.get("name", ""), "select", disabled=disabled)
             self._form.controls.append(self._select)
@@ -212,9 +208,7 @@ def calendar(html: str) -> Calendar:
     rule = _RULE.search(html)
     form_url = _FORM_URL.search(html)
     if not rooms or not rule or not form_url:
-        missing = [
-            label for label, ok in (("琴房", rooms), ("规则编号", rule), ("表单地址", form_url)) if not ok
-        ]
+        missing = [label for label, ok in (("琴房", rooms), ("规则编号", rule), ("表单地址", form_url)) if not ok]
         raise Unexpected(f"日历页上没有找到{'、'.join(missing)}")
     limit = _LIMIT.search(html)
     slots = dict(_SLOTS.findall(html))

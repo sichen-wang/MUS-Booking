@@ -87,9 +87,7 @@ def test_filled_form_has_our_four_answers_in_place():
     filled = Form("room", date(2026, 11, 25), Span(1380, 1410), tuple(form.pairs())).filled("")
     values = dict(filled)
     assert len(filled) == 46
-    assert (
-        values["theme"] == values["bizFieldBookField.theme"] == values["bizFieldBookField.useDesc"] == "练琴"
-    )
+    assert values["theme"] == values["bizFieldBookField.theme"] == values["bizFieldBookField.useDesc"] == "练琴"
     assert values["bizFieldBookField.joinNums"] == "1"
     assert values["userPhone"] == "000000"
     assert [name for name, _ in filled] == [name for name, _ in form.pairs()]
@@ -133,9 +131,7 @@ def test_my_bookings_records_match_by_room_name_and_times():
     span = Span.parse(row["startTime"][11:], row["endTime"][11:])
     assert record.matches(row["nameZh"], day, span)
     assert not record.matches("MPC999 琴房", day, span)
-    assert not Record(row["id"], row["nameZh"], row["startTime"], row["endTime"], "4").matches(
-        row["nameZh"], day, span
-    )
+    assert not Record(row["id"], row["nameZh"], row["startTime"], row["endTime"], "4").matches(row["nameZh"], day, span)
 
 
 def test_practice_rooms_are_found_among_bookable_types():

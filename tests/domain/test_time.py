@@ -77,9 +77,7 @@ def test_next_opening_uses_china_time_whatever_the_input_zone():
 
     pacific = timezone(timedelta(hours=-8))
     # 太平洋时间 11 月 25 日 06:00 = 中国时间 11 月 25 日 22:00，已过当天的 21:00
-    assert next_opening(datetime(2026, 11, 25, 6, 0, tzinfo=pacific)) == datetime(
-        2026, 11, 26, 21, 0, tzinfo=CHINA
-    )
+    assert next_opening(datetime(2026, 11, 25, 6, 0, tzinfo=pacific)) == datetime(2026, 11, 26, 21, 0, tzinfo=CHINA)
 
 
 def test_monday_crosses_months():

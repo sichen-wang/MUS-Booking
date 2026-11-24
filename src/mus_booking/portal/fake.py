@@ -150,9 +150,7 @@ class FakeSchool:
                 response = self._redirect_with_code(request, redirect, user)
                 response.headers["set-cookie"] = f"MSISAuth={token}; Path=/adfs; Secure; HttpOnly"
                 return response
-            return _html(
-                request, _ADFS_PAGE.format(query=escape(request.url.query.decode()), error=_ADFS_ERROR)
-            )
+            return _html(request, _ADFS_PAGE.format(query=escape(request.url.query.decode()), error=_ADFS_ERROR))
         return _html(request, _ADFS_PAGE.format(query=escape(request.url.query.decode()), error=""))
 
     def _redirect_with_code(self, request: httpx.Request, redirect: str, user: str) -> httpx.Response:
@@ -175,9 +173,7 @@ class FakeSchool:
             response.headers["set-cookie"] = f"sid={sid}; Path=/; Secure; HttpOnly"
             return response
         if path == "/portal/shortcut.html":
-            return _html(
-                request, "<html><head><title>aTrust</title></head><body><div id=app></div></body></html>"
-            )
+            return _html(request, "<html><head><title>aTrust</title></head><body><div id=app></div></body></html>")
         if path == "/passport/v1/public/authConfig":
             return _json(request, {"code": 0, "data": {"security": {"csrfToken": f"csrf-{session}"}}})
         if path == "/controller/v1/public/reportEnv":
@@ -212,9 +208,7 @@ class FakeSchool:
         if path == "/":
             return _html(request, '<html><body><a href="/sso/login">Login</a></body></html>')
         if path == "/sso/login":
-            query = urlencode(
-                {"client_id": "booking", "redirect_uri": f"{BOOKING}/sso/code", "response_type": "code"}
-            )
+            query = urlencode({"client_id": "booking", "redirect_uri": f"{BOOKING}/sso/code", "response_type": "code"})
             return _redirect(request, f"https://sts.cuhk.edu.cn/adfs/oauth2/authorize?{query}")
         if path == "/sso/code":
             user = self._codes.pop(request.url.params.get("code", ""), None)
@@ -255,10 +249,7 @@ class FakeSchool:
             {"id": "1180", "nameZh": "音乐学院图书馆静音舱", "nameEn": "SilenCells", "bookFlag": 1},
             {"id": "2001", "nameZh": "教师琴房", "nameEn": "Teacher Practice Room", "bookFlag": 0},
             {"id": TYPE_ID, "nameZh": "学生琴房", "nameEn": "Student Practice Room", "bookFlag": 1},
-        ] + [
-            {"id": str(3000 + n), "nameZh": f"研讨室 {n}", "nameEn": "Seminar Room", "bookFlag": 1}
-            for n in range(7)
-        ]
+        ] + [{"id": str(3000 + n), "nameZh": f"研讨室 {n}", "nameEn": "Seminar Room", "bookFlag": 1} for n in range(7)]
         page = int(request.url.params.get("pageNo", "1"))
         per = 8
         pages = (len(rows) + per - 1) // per
@@ -271,9 +262,7 @@ class FakeSchool:
             for n, room in enumerate(self.rooms)
         )
         millis = int(self.now().timestamp() * 1000)
-        return _CALENDAR.format(
-            resources=resources, now=millis, rule=RULE_ID if with_rule else "", form_url=_FORM_URL
-        )
+        return _CALENDAR.format(resources=resources, now=millis, rule=RULE_ID if with_rule else "", form_url=_FORM_URL)
 
     def _form(self, request: httpx.Request, account: Account) -> httpx.Response:
         params = dict(request.url.params)
@@ -357,9 +346,7 @@ def _redirect(request: httpx.Request, location: str) -> httpx.Response:
 
 
 def _html(request: httpx.Request, text: str, status: int = 200) -> httpx.Response:
-    return httpx.Response(
-        status, headers={"content-type": "text/html;charset=UTF-8"}, text=text, request=request
-    )
+    return httpx.Response(status, headers={"content-type": "text/html;charset=UTF-8"}, text=text, request=request)
 
 
 def _json(request: httpx.Request, payload: object) -> httpx.Response:
@@ -371,9 +358,7 @@ def _json(request: httpx.Request, payload: object) -> httpx.Response:
     )
 
 
-_ADFS_ERROR = (
-    '<span id="errorText" for="">用户 ID 或密码不正确。请键入正确的用户 ID 和密码，然后重试。</span>'
-)
+_ADFS_ERROR = '<span id="errorText" for="">用户 ID 或密码不正确。请键入正确的用户 ID 和密码，然后重试。</span>'
 
 _ADFS_PAGE = """<!DOCTYPE html><html><head><title>登录</title></head><body>
 <form method="post" id="loginForm" autocomplete="off"

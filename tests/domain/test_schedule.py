@@ -151,9 +151,7 @@ def test_failed_segments_free_their_time_and_booked_ones_hold_it():
 
 
 def test_a_weekly_series_clashes_with_a_one_off_on_its_weekday():
-    trial = Schedule(
-        bookings=(booking(1, "09:00-11:00", NEXT_TUE), booking(2, "10:00-12:00", TUE, weekly=True))
-    )
+    trial = Schedule(bookings=(booking(1, "09:00-11:00", NEXT_TUE), booking(2, "10:00-12:00", TUE, weekly=True)))
     assert trial.problem(2, TUE) == "时间与已有的预定重叠"
 
 

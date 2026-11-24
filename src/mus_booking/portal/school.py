@@ -38,8 +38,7 @@ AUTHORIZE = "https://sts.cuhk.edu.cn/adfs/oauth2/authorize?" + urlencode(
 )
 ATRUST_COMMON = {"clientType": "SDPBrowserClient", "platform": "Windows", "lang": "zh-CN"}
 USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 )
 TIMEOUT = 20.0
 SUBMIT_TIMEOUT = 30.0
@@ -173,9 +172,7 @@ class School:
         self._csrf = ""
 
     @classmethod
-    def open(
-        cls, cookies: Iterable[dict[str, str]] = (), *, transport: httpx.AsyncBaseTransport | None = None
-    ):
+    def open(cls, cookies: Iterable[dict[str, str]] = (), *, transport: httpx.AsyncBaseTransport | None = None):
         client = httpx.AsyncClient(
             headers={"User-Agent": USER_AGENT, "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"},
             follow_redirects=False,
@@ -205,9 +202,7 @@ class School:
 
     # ---- 登录 -----------------------------------------------------------------
 
-    async def sign_in(
-        self, student_id: str, password: str | None, *, verify_password: bool = False
-    ) -> pages.Home:
+    async def sign_in(self, student_id: str, password: str | None, *, verify_password: bool = False) -> pages.Home:
         """登录到场地系统，返回首页上的用户信息。
 
         平时优先沿用保存的凭据，不提交密码。`verify_password` 为真时（绑定、换设备登录），
@@ -236,17 +231,13 @@ class School:
             if home.url.host == ADFS_HOST:
                 home = await self._submit_password(home, student_id, password)
                 checked = True
-        if not (
-            home.status_code == 200 and home.url.host == BOOKING_HOST and home.url.path.startswith("/a/")
-        ):
+        if not (home.status_code == 200 and home.url.host == BOOKING_HOST and home.url.path.startswith("/a/")):
             raise Unexpected(f"没能登录场地系统（停在 {home.url.host}{home.url.path}）")
         if verify_password and not checked:
             raise Unexpected("学校没有要求输入密码，无法核对")
         return pages.home(home.text)
 
-    async def _submit_password(
-        self, page: httpx.Response, student_id: str, password: str | None
-    ) -> httpx.Response:
+    async def _submit_password(self, page: httpx.Response, student_id: str, password: str | None) -> httpx.Response:
         form = pages.password_form(page.text)
         if form is None:
             if pages.asks_extra_auth(page.text):
@@ -275,9 +266,7 @@ class School:
         """代替 aTrust 门户页的脚本完成登录收尾：取 CSRF 令牌、上报环境、通过认证检查。"""
         flow = dict(landing.url.params)
         extra = pages.json_or_none(flow.get("data") or "") or {}
-        config = await self._atrust(
-            "GET", "/passport/v1/public/authConfig", params={"mod": "1", "needTicket": "1"}
-        )
+        config = await self._atrust("GET", "/passport/v1/public/authConfig", params={"mod": "1", "needTicket": "1"})
         self._csrf = str(((config.get("data") or {}).get("security") or {}).get("csrfToken") or "")
         env = extra.get("env") if isinstance(extra, dict) else None
         if isinstance(env, dict) and env.get("need") and extra.get("ticket"):
@@ -534,9 +523,7 @@ def _int(value: Any) -> int:
         return 0
 
 
-def _next_step(
-    response: httpx.Response, data: dict[str, str] | None
-) -> tuple[str, str, dict[str, str] | None] | None:
+def _next_step(response: httpx.Response, data: dict[str, str] | None) -> tuple[str, str, dict[str, str] | None] | None:
     base = str(response.url)
     if response.status_code in _REDIRECTS and "location" in response.headers:
         target = urljoin(base, response.headers["location"])
@@ -549,9 +536,7 @@ def _next_step(
     if response.status_code != 200 or "html" not in response.headers.get("content-type", ""):
         return None
     html = response.text
-    refresh = re.search(
-        r'http-equiv=["\']?refresh["\']?[^>]*content=["\']?\d+;\s*url=([^"\'>\s]+)', html, re.I
-    )
+    refresh = re.search(r'http-equiv=["\']?refresh["\']?[^>]*content=["\']?\d+;\s*url=([^"\'>\s]+)', html, re.I)
     if refresh:
         return "GET", urljoin(base, refresh.group(1)), None
     found = pages.forms(html)
@@ -559,9 +544,7 @@ def _next_step(
         form = found[0]
         return form.method.upper() or "POST", urljoin(base, form.action), dict(form.pairs())
     if not found and len(html) < 3000:
-        jump = re.search(
-            r'location(?:\.href)?\s*=\s*["\']([^"\']+)["\']|location\.replace\(\s*["\']([^"\']+)', html
-        )
+        jump = re.search(r'location(?:\.href)?\s*=\s*["\']([^"\']+)["\']|location\.replace\(\s*["\']([^"\']+)', html)
         if jump:
             return "GET", urljoin(base, jump.group(1) or jump.group(2)), None
     return None
