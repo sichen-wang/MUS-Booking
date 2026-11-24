@@ -367,6 +367,9 @@ def test_everything_works_under_a_path_prefix():
     page = world.client.get("/?invite=abcd")
     links = re.findall(r'(?:href|action|src)="([^"]+)"', page.text)
     assert links and all(link.startswith("/booking/") for link in links)
+    # Caddy 的 handle_path 去掉前缀后再转发，所以服务收到的路径不带 /booking
+    assert world.client.get("/static/app.css").status_code == 200
+    assert world.client.get("/manifest.webmanifest").json()["start_url"] == "/booking/"
     response = world.client.post(
         "/bind", data={"code": world.invite(), "student_id": "123000001", "password": "right"}, follow_redirects=False
     )
