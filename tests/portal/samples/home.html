@@ -1,0 +1,20 @@
+<!-- 学校场地系统首页 /a/system/main 的片段（已去除个人信息）-->
+<div class="kt-header__topbar">
+<div id="userId" class="kt-header__topbar-user" style="cursor: context-menu;">
+
+								<i class="fa fa-user-circle userinfo colorWhite"></i>
+
+								<span class="font12 colorWhite" style="margin-left: 5px;line-height: 20px;">
+
+								测试同学
+
+								</span>
+</div></div>
+<script>
+$.ajax({
+    url: "/a/field/cat/bizFieldType/listDataByUser",
+    data: {
+                "userId": "123000001",
+    }
+});
+</script>

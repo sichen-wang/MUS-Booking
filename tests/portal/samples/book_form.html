@@ -1,0 +1,540 @@
+<!-- 预定表单 /a/field/client/bookForm 的表单部分（已去除个人信息）-->
+<form id="bizFieldBookMainForm" class="kt-form kt-form--label-right" action="/a/edu/rec/bizServFlowRec/saveData" method="post">
+    <div class="">
+        <div class="row">
+            <div class="kt-portlet col-md-12 " style="margin-bottom: 0px;box-shadow: none">
+                <div class="kt-portlet__head">
+                    <div class="kt-portlet__head-label">
+                        <h3 class="kt-portlet__head-title">
+                            填写信息
+                        </h3>
+                    </div>
+                </div>
+                <div class="kt-portlet__body">
+                    <input id="id" name="id" type="hidden" value="f0rm0000000000000000000000000001"/>
+                    <input id="userId" name="user.id" type="hidden" value="123000001"/>
+                    <input id="serialNo" name="serialNo" type="hidden" value=""/>
+                    <input id="userOrgId" name="userOrgId" type="hidden" value="00000000-0000-0000-0000-000000000000"/>
+                    <input id="status" name="status" type="hidden" value=""/>
+                    <input id="approvalFlag" name="approvalFlag" type="hidden" value="0"/>
+                    <input id="bizFieldBookField.id" name="bizFieldBookField.id" type="hidden" value="f1e1d000000000000000000000000001"/>
+                    <input id="bizFieldBookField.FId" name="bizFieldBookField.FId" type="hidden" value="76e34000bc5348598a705ae483005308"/>
+                    <input id="bizFieldBookField.BId" name="bizFieldBookField.BId" type="hidden" value="f0rm0000000000000000000000000001"/>
+                    <input id="bizFieldBookFieldTheme" name="bizFieldBookField.theme" type="hidden" value=""/>
+                    <input hidden="hidden" name="submitTime" id="d_submitDate" type="text"
+                           value=""/>
+                    <input id="isNewRecord" name="isNewRecord" type="hidden" value="true"/>
+                    <input type="hidden" name="bookToken" value="t0ken0000000000000000000000000001"/>
+                    <input type="hidden" name="captchaPass" id="captchaPass" value=""/>
+
+                    <input id="extend1" name="extend1" type="hidden" value="af15efadc379429885681cbad7b1ec12"/>
+                    <input id="extend2" name="extend2" type="hidden" value=""/>
+                    <input id="extend3" name="extend3" type="hidden" value=""/>
+                    <input id="extend4" name="extend4" type="hidden" value=""/>
+                    <input id="extend5" name="extend5" type="hidden" value=""/>
+                    <input id="userJob" name="userJob" type="hidden" value=""/>
+                    <input id="userGrp" name="userGrp" type="hidden" value="group-0000000000000000000000000000000000000"/>
+                    <input id="userMobile" name="userMobile" type="hidden" value=""/>
+                        
+                        
+                    <input id="bizFieldBookField.extend3" name="bizFieldBookField.extend3" type="hidden" value=""/>
+                    <input id="bizFieldBookField.extend4" name="bizFieldBookField.extend4" type="hidden" value=""/>
+                    <input id="bizFieldBookField.extend5" name="bizFieldBookField.extend5" type="hidden" value=""/>
+                    <input id="userTag" name="userTag" type="hidden" value="Student"/>
+                    <input id="bookType" name="bookType" type="hidden" value="0"/>
+                    <input type="hidden" name="fitBook" value="false">
+                    <div class="row">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">预订人:</label>
+                                <!-- 申请人  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <input id="userName" name="user.name" class="form-control" readonly="readonly" type="text" value="测试同学" maxlength="64"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">学院/部门:</label>
+                                <!-- 学院/部门  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <input id="userOrgName" name="userOrgName" class="form-control" readonly="readonly" type="text" value="MUS" maxlength="64"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">邮箱:</label>
+                                <!-- 邮箱  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <input id="userEmail" name="userEmail" class="form-control" type="text" value="student@link.cuhk.edu.cn" maxlength="64"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label"><span
+                                        style="color:red">*</span>联系电话:</label>
+                                <!-- 联系电话  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <input id="userPhone" name="userPhone" onkeyup="this.value=this.value.replace(/\D/g,'')" onafterpaste="this.value=this.value.replace(/\D/g,'')" class="form-control" type="text" value="" maxlength="20"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">
+                                    
+                                        <span style="color:red">*</span>
+                                    
+                                    主题:</label>
+                                <!-- 主题  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    
+                                        
+                                        
+                                        
+                                            <input id="theme" name="theme" class="form-control" type="text" value="" maxlength="64"/>
+                                        
+                                    
+
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">场地类型:</label>
+                                <!-- 场地类型  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <input value="学生琴房"
+                                           htmlEscape="false" maxlength="64" class="form-control" disabled="true"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">场地名称:</label>
+                                <!-- 场地名称  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <input value="MPC321 室内乐琴房（GP）"
+                                           htmlEscape="false" maxlength="64" class="form-control" disabled="true"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">容纳人数:</label>
+                                <!-- 容纳人数  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <input value="1" htmlEscape="false" maxlength="64"
+                                           class="form-control" disabled="true"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">开始时间:</label>
+                                <!-- 开始时间  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <input name="bizFieldBookField.startTime" hidden id="startTimeHidden"
+                                           class="form-control week-date-input date-input kt-input_member_log text_left"
+                                           type="text"
+                                           value="2026-11-25 12:00"
+                                           readonly/>
+                                    <input id="startTime"
+                                           class="form-control week-date-input date-input kt-input_member_log text_left"
+                                           type="text"
+                                           value="2026-11-25 12:00"
+                                           readonly/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">结束时间:</label>
+                                <!-- 结束时间  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <input name="bizFieldBookField.endTime" hidden id="endTimeHidden"
+                                           class="form-control week-date-input date-input kt-input_member_log text_left"
+                                           type="text"
+                                           value="2026-11-25 13:00"
+                                           readonly/>
+                                    <input id="endTime"
+                                           class="form-control week-date-input date-input kt-input_member_log text_left"
+                                           type="text"
+                                           value="2026-11-25 13:00"
+                                           readonly/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                        
+                        
+                            <div class="row" style="">
+                                <div class="col-sm-12 col-md-12">
+                                    <div class="form-group row">
+                                        <label for="bizFieldBookField.joinNums"
+                                               class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">
+                                            
+                                                <span style="color:red">*</span>
+                                            
+                                            参与人数:</label>
+                                        <!-- 参与人数  -->
+                                        <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                            <input id="bizFieldBookField.joinNums" name="bizFieldBookField.joinNums" onkeyup="this.value=this.value.replace(/\D/g,'')" onafterpaste="this.value=this.value.replace(/\D/g,'')" class="form-control" type="text" value="" maxlength="10"/>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row"
+                                 style="display: none">
+                                <div class="col-sm-12 col-md-12">
+                                    <div class="form-group row">
+                                        <label for="extend18"
+                                               class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">
+                                            
+                                            
+                                                是否有大学领导参会:
+                                            
+                                        </label>
+                                            
+                                        <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                            <select id="extend18" name="extend18" class="form-control duplicate_select_extend18">
+                                                <option selected="selected" value="0">否</option>
+                                                <option value="1">是</option>
+                                            </select>
+                                        </div>
+
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row duplicate_extend18">
+                                <div class="col-sm-12 col-md-12">
+                                    <div class="form-group row">
+                                        <label for="leaders" class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">
+                                            <span style="color:red">*</span> 参会校领导:</label>
+                                        <!-- 参会校领导  -->
+                                        <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                            <input name="leaders" type="text" class="rep_rule form-control col-md-12 "
+                                                   value=""/>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        
+                    
+                    
+                        
+                        
+                            <input id="bizFieldBookField.needRep" name="bizFieldBookField.needRep" type="hidden" value="0"/>
+                        
+                    
+                    <div class="row"
+                         style="display: none">
+                        <div class="row">
+                            <div class="col-sm-12 col-md-12">
+                                <div class="form-group row">
+                                    <label for="type" class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">
+                                        
+                                            
+                                            
+                                                预订类型:
+                                            
+                                        
+                                    </label>
+                                    <!-- 预定类型  -->
+                                    <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                        
+                                        
+                                        
+                                        
+                                        
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row"
+                         style="display: none">
+                        <div class="row">
+                            <div class="col-sm-12 col-md-12">
+                                <div class="form-group row">
+                                    <label for="type" class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">
+                                        <span style="color:red">*</span>预订类型:
+                                    </label>
+                                    <!-- 预定类型  -->
+                                    <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                        <select id="type" name="type" class="form-control type_select">
+                                            <option value="" selected="selected"></option>
+                                            <option value="1111">重要活动/校级活动</option><option value="1112">院级活动/部门活动</option><option value="1113">日常活动/基础活动</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row duplicate5">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label for="otherType" class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">
+                                    <span style="color:red">*</span> 其他预订类型:</label>
+                                <!-- 预定类型（其他）  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <input name="otherType" type="text" class="rep_rule form-control col-md-12 "
+                                           value=""/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row" style="display: none">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">
+                                    
+                                        是否需要提供会务服务:
+                                    
+                                    
+                                </label>
+                                <!-- 是否需要会务人员提供服务  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <div class="radio-group" style="padding-top: 8px;">
+                                        <label class="kt-radio kt-radio--success font14"><!-- 启用 -->
+                                            <input class="redioInput" type="radio" name="bizFieldBookField.extend1"
+                                                   value="1"
+                                                   >
+                                            是
+                                            <span></span>
+                                        </label>
+                                        &emsp;&emsp;&emsp;&emsp;
+                                        <label class="kt-radio kt-radio--success font14"><!-- 禁用 -->
+                                            <input class="redioInput" type="radio" name="bizFieldBookField.extend1"
+                                                   value="0"
+                                                   checked>
+                                            否
+                                            <span></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                    <div class="row duplicate6">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label for="extend14" class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">
+                                    <span style="color:red">*</span> 纸笔/份:</label>
+                                <!-- 纸笔/份  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <input id="extend14" name="extend14" onkeyup="this.value=this.value.replace(/\D/g,'')" onafterpaste="this.value=this.value.replace(/\D/g,'')" class="form-control" type="text" value="" maxlength="5"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row duplicate7">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label for="extend15" class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">
+                                    <span style="color:red">*</span> 热茶/份:</label>
+                                <!-- 热茶/份  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <input id="extend15" name="extend15" onkeyup="this.value=this.value.replace(/\D/g,'')" onafterpaste="this.value=this.value.replace(/\D/g,'')" class="form-control" type="text" value="" maxlength="5"/>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row"
+                         style="display: none">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                    <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">是否需要会议支持:</label>
+
+
+
+
+
+
+                                <!-- 是否需要会议支持  -->
+                                <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                    <div class="radio-group" style="padding-top: 8px;">
+                                        <label class="kt-radio kt-radio--success font14"><!-- 启用 -->
+                                            <input class="redioInput2" type="radio" name="extend16" value="1">
+                                            是
+                                            <span></span>
+                                        </label>
+                                        &emsp;&emsp;&emsp;&emsp;
+                                        <label class="kt-radio kt-radio--success font14"><!-- 禁用 -->
+                                            <input class="redioInput2" type="radio" name="extend16" value="0" checked>
+                                            否
+                                            <span></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                    
+                    
+                    
+                    
+                    
+                    
+                        <div class="row">
+                            <div class="col-sm-12 col-md-12">
+                                <div class="form-group row">
+                                    <label for="bizFieldBookField.useDesc"
+                                           class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">
+                                        
+                                            <span style="color:red">*</span>
+                                        
+                                        
+                                        用途说明:</label>
+                                        
+                                        
+
+                                    <!-- 用途说明  -->
+                                    <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                        
+                                            
+                                            
+                                                
+                                                <textarea id="useDesc" name="bizFieldBookField.useDesc" maxlength="666" class="form-control" rows="6">
+</textarea>
+                                            
+                                        
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    
+                    
+                    <div class="row">
+                        <div class="col-sm-12 col-md-12">
+                            <div class="form-group row">
+                                <label class="col-lg-3 col-md-3 col-sm-3 col-xs-3 col-form-label">
+                                    
+                                    
+                                        附件说明:
+                                    
+                                    
+                                    
+                                        
+                                        
+                                        
+                                </label>
+
+                                <!-- 附件说明  -->
+                                
+                                    <div class="col-lg-9 col-md-9 col-sm-9  col-xs-9">
+                                        <button type="button" class="layui-btn layui-btn-sm" name="uploadFile"
+                                                id="uploadFile" lay-verify="attrequired" lay-verType="tips"
+                                                style="background-color: #702393">
+                                            <i class="layui-icon">&#xe654;</i>上传</button>
+                                        <table class="layui-table ac" lay-skin="nob" lay-size="sm"
+                                               id="attachments"></table>
+                                    </div>
+                                
+                            </div>
+                        </div>
+                    </div>
+
+                    
+                    
+                    
+                    
+                    
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    
+    
+    </div>
+</form>
+<input  id="person_select_dialogname" name="person_select_dialogname" htmlEscape="false" class="form-control kt-input" placeholder="姓名、部门名称（英文）..."  />

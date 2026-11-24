@@ -1,0 +1,56 @@
+<!-- 场地日历页 /a/field/client/main 的关键片段，按原文顺序截取 -->
+<script>
+                var resource = {
+                    id: '76e34000bc5348598a705ae483005308',
+                    fname: 'MPC321 室内乐琴房（GP）',
+                    title: 'MPC321 室内乐琴房（GP）',
+                    sort: 2321  //此处直接用数字才能是数字排序，加引号后会变成字符串排序1->11->2
+                }
+                if(('501' == areaCode || areaCode == '') && ('76e34000bc5348598a705ae483005308' == field || field == '')
+                    && ('' == classRoomCategory || classRoomCategory == '')
+                    && (Number('1') >= Number(capNums) || capNums == '')){
+                    resources.push(resource)
+                }
+
+                var resource = {
+                    id: 'f02f83d544f4490f8237c869eee87913',
+                    fname: 'MPC322 室内乐琴房（UP）',
+                    title: 'MPC322 室内乐琴房（UP）',
+                    sort: 2322  //此处直接用数字才能是数字排序，加引号后会变成字符串排序1->11->2
+                }
+                if(('501' == areaCode || areaCode == '') && ('f02f83d544f4490f8237c869eee87913' == field || field == '')
+                    && ('' == classRoomCategory || classRoomCategory == '')
+                    && (Number('1') >= Number(capNums) || capNums == '')){
+                    resources.push(resource)
+                }
+
+                var resource = {
+                    id: 'dc4f0f555ac34e5e8c659b71887e9743',
+                    fname: 'MPC334 室内乐琴房（GP）',
+                    title: 'MPC334 室内乐琴房（GP）',
+                    sort: 2334  //此处直接用数字才能是数字排序，加引号后会变成字符串排序1->11->2
+                }
+                if(('501' == areaCode || areaCode == '') && ('dc4f0f555ac34e5e8c659b71887e9743' == field || field == '')
+                    && ('' == classRoomCategory || classRoomCategory == '')
+                    && (Number('1') >= Number(capNums) || capNums == '')){
+                    resources.push(resource)
+                }
+
+            nowIndicator:false,
+            slotMinTime : '00:00',			//周/日视图左边时间线显示的最小日期，默认00:00:00
+            slotMaxTime : '23:30',			//周/日视图左边时间线显示的最大日期，默认24:00:00
+
+                        if(false || $("#selectDate").val() != dateFormat('yyyy-MM-dd',new Date(1795552620143))){
+
+            var fbookFre = "";
+            var fbookFreUnit = "";
+            var fbookDur = "";
+            var fbookDurUnit = "";
+            var timeLimitLow = Number("0");
+            var timeLimit = Number("2");
+
+                    $.post("/a/field/book/bizFieldBookMain/saveData?reBookMainId=&ruleId=4b4d6e5c826c425b9a5ed7a02a46656a", JSON.parse(result), function (result) {
+
+            content: ['/a/field/client/bookForm?fId=' + fid + '&bizFieldBookField.startTime=' + startTime + '&bizFieldBookField.endTime=' + endTime + '&repFlag=0' +
+            '&bookType=0&userTag=Student&approvalFlag=0&extend2=&bookedNum=' + bookedNum + '&fitBook=' + isFitBook + '&isDeptAdmin=false' + '&adMost=0'],
+</script>
