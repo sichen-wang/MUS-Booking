@@ -90,11 +90,16 @@ READ_ONLY_POSTS = {
     "/a/field/client/main",
     "/a/field/book/bizFieldBookMainMe/listData",
 }
-TYPE_HINT = re.compile(r"琴房|piano|practice", re.I)  # 仅用于探测时挑出要细看的场地类型
+# 仅用于探测时挑出要细看的场地类型：名字或所属部门像琴房、音乐学院的
+TYPE_HINT = re.compile(r"琴房|piano|practice|音乐|music", re.I)
+# 旧版代码里的 extend1，读页面后得知它是场地类型“学生琴房”的编号；列表里找不到时用它兜底
+KNOWN_TYPE = "af15efadc379429885681cbad7b1ec12"
 TYPE_LIMIT = 3
+TYPE_PAGES = 40
+GROUP = re.compile(r"refreshGrp\('([^']*)','([^']*)','([^']*)','([^']*)'\)")
 ROOM = re.compile(r"id:\s*'([0-9a-zA-Z]+)',\s*fname:\s*'([^']*)'")
 RULE = re.compile(r"saveData\?reBookMainId=[^&\"']*&ruleId=([0-9a-zA-Z]*)")
-PAGE_VAR = re.compile(r"var\s+(fbookFre\w*|timeLimit\w*|\w*[oO]penTime\w*|\w*[aA]dvance\w*|minTime|maxTime)\s*=\s*([^;\n]{0,60})")
+PAGE_VAR = re.compile(r"var\s+(fbookFre\w*|fbookDur\w*|timeLimit\w*|\w*[oO]penTime\w*|\w*[aA]dvance\w*|minTime|maxTime)\s*=\s*([^;\n]{0,60})")
 PERSON_TAG = re.compile(r'name\s*=\s*"personTag";\s*\w+\.value\s*=\s*"(\w*)"')
 
 
@@ -492,28 +497,32 @@ class Probe:
         user_id = first_group(re.compile(r'"userId":\s*"([^"]+)"'), decoded(home))
         self.say(f"   主页里的 userId：{'已找到' if user_id else '没有找到'}")
         types: list[dict[str, Any]] = []
-        for page_no in range(1, 6):
+        for page_no in range(1, TYPE_PAGES + 1):
             listing = self.booking("GET", "/a/field/cat/bizFieldType/listDataByUser", params={
                 "userId": user_id, "deptId": "", "fcCode": "", "area": "", "position": "", "search": "",
                 "pageNo": str(page_no),
             })
             payload = loads_or_empty(decoded(listing))
             rows = payload.get("data") if isinstance(payload, dict) else None
-            if not isinstance(rows, list) or not rows:
+            if not isinstance(rows, list):
                 self.say(f"     ↳ {shape(payload) if payload else describe(listing)}")
                 break
-            if page_no == 1:
-                self.say(f"     ↳ 每项的结构：{shape(rows[0])}")
             types.extend(row for row in rows if isinstance(row, dict))
             if page_no >= int((payload.get("meta") or {}).get("pages") or 1):
                 break
-        for row in types:
-            self.say(f"   {row.get('id')} · {row.get('nameZh')} · {row.get('deptName')} · bookFlag={row.get('bookFlag')} extFlag={row.get('extFlag')}")
+        bookable = [row for row in types if row.get("bookFlag")]
+        self.say(f"   共 {len(types)} 个场地类型，其中这个账号可预定的 {len(bookable)} 个：")
+        for row in bookable:
+            self.say(f"   {row.get('id')} · {row.get('nameZh')} · {row.get('deptName')} · "
+                     f"bookFlag={row.get('bookFlag')} haveAuth={row.get('haveAuth')} haveRule={row.get('haveRule')}")
 
-        chosen = [row for row in types if TYPE_HINT.search(f"{row.get('nameZh')} {row.get('nameEn')}")][:TYPE_LIMIT]
+        chosen = [row for row in bookable
+                  if TYPE_HINT.search(f"{row.get('nameZh')} {row.get('nameEn')} {row.get('deptName')} {row.get('deptNameEng')}")]
         if not chosen:
-            self.say("   没有名字像琴房的场地类型，后面的步骤跳过")
-        for row in chosen:
+            self.say("   可预定的类型里没有像琴房的，改用旧版代码里的类型编号")
+            chosen = [next((row for row in types if row.get("id") == KNOWN_TYPE),
+                           {"id": KNOWN_TYPE, "nameZh": "旧版代码里的类型编号", "bookFlag": 1})]
+        for row in chosen[:TYPE_LIMIT]:
             self._discover_type(row)
 
         self.section("7. 我的预定（只读列表）")
@@ -525,7 +534,7 @@ class Probe:
         type_id = str(row.get("id"))
         self.section(f"6. 场地类型「{row.get('nameZh')}」")
         details = self.booking("POST", "/a/field/client/fieldTypeDetails",
-                               data={"id": type_id, "bookFlag": str(row.get("bookFlag") or "")})
+                               data={"id": type_id, "bookFlag": str(int(row.get("bookFlag") or 0))})
         self.say(f"     ↳ {describe(details)}")
         tag = first_group(PERSON_TAG, decoded(details)) or "Student"
         calendar = self.booking("POST", "/a/field/client/main",
@@ -536,6 +545,7 @@ class Probe:
         self.say(f"     ↳ {describe(calendar)}")
         self.say(f"   personTag={tag} · ruleId={f'{len(rule)} 位' if rule else '没有找到'} · 琴房 {len(rooms)} 间")
         self.say(f"   琴房：{'、'.join(name for _, name in rooms[:80])}")
+        self.say(f"   页面顶部的用户组下拉：{len(set(GROUP.findall(text)))} 项")
         for name, value in dict.fromkeys(PAGE_VAR.findall(text)):
             self.say(f"   页面变量 {name} = {value.strip()}")
         for found in parse_forms(text):
@@ -555,13 +565,19 @@ class Probe:
 
         if not rooms:
             return
+        for path in ("/a/field/client/getBookCountByRule", "/a/field/client/getBookTimeByRule"):
+            used = self.booking("GET", path, params={
+                "extend1": type_id, "startTime": f"{tomorrow:%Y-%m-%d}", "endTime": f"{tomorrow:%Y-%m-%d}",
+                "fId": rooms[0][0],
+            })
+            self.say(f"     ↳ {decoded(used)[:120]}")
         slots = {
             "明天": (f"{tomorrow:%Y-%m-%d} 10:00", f"{tomorrow:%Y-%m-%d} 11:00"),
             "后天": (f"{after:%Y-%m-%d} 10:00", f"{after:%Y-%m-%d} 11:00"),
         }
-        if now.hour < 21:
-            later = (now + timedelta(hours=1)).replace(minute=0)
-            slots = {"今天": (f"{later:%Y-%m-%d %H:%M}", f"{later + timedelta(hours=1):%Y-%m-%d %H:%M}"), **slots}
+        hour = max(now.hour + 1, 12)  # 今天挑一个白天、还没过去的整点
+        if hour <= 21:
+            slots = {"今天": (f"{now:%Y-%m-%d} {hour:02d}:00", f"{now:%Y-%m-%d} {hour + 1:02d}:00"), **slots}
         for label, (start, end) in slots.items():
             query = {
                 "fId": rooms[0][0], "bizFieldBookField.startTime": start, "bizFieldBookField.endTime": end,
