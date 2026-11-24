@@ -44,7 +44,8 @@ import httpx
 
 BOOKING = "https://booking.cuhk.edu.cn/"
 BOOKING_HOST = "booking.cuhk.edu.cn"
-BOOKING_HOME = "https://booking.cuhk.edu.cn/a/field/client/main"
+BOOKING_LOGIN = "https://booking.cuhk.edu.cn/sso/login"  # 落地页上 Login 按钮的地址
+BOOKING_HOME = "https://booking.cuhk.edu.cn/a/system/main"  # 登录成功后落到的主页
 ADFS_HOST = "sts.cuhk.edu.cn"
 ATRUST = "https://atrust.cuhk.edu.cn"
 # aTrust 门户用 JS 跳到这个地址；其中 client_id 是公开的客户端标识，不是密钥。
@@ -72,27 +73,28 @@ SAFE_KEYS = {
     "secondAuthType", "need", "isLogin", "autoRedirect", "enableStartClient", "status",
 }
 
-# 预订系统落地页里，带这些字样的地址可能是登录入口
-LOGIN_URL = re.compile(r"""["'`]([^"'`\s<>]*(?:login|sso|oauth|adfs)[^"'`\s<>]*)["'`]""", re.I)
-LOGIN_GUESSES = ("/a/login", "/sso/login", "/login")
-LOGIN_TRIES = 8
 STATIC_EXT = re.compile(r"\.(?:js|css|png|jpe?g|gif|svg|ico|woff2?|ttf|map)$", re.I)
+# 通用库和 aTrust 网关注入的脚本不用看
 LIBRARY_SCRIPT = re.compile(
-    r"jquery|bootstrap|layer|select2|wdate|my97|validat|ztree|echarts|adminlte|icheck|moment"
-    r"|i18n|font|polyfill|\.min\.js",
+    r"sf-webproxy|/vendors/|bundle|bideo|jquery|bootstrap|layer|select2|wdate|my97|validat|ztree"
+    r"|echarts|adminlte|icheck|moment|i18n|font|polyfill|\.min\.js",
     re.I,
 )
-SCRIPT_LIMIT = 15
+SCRIPT_LIMIT = 25
 # 已登录后只读探查时，绝不访问带这些字样的地址
 UNSAFE_PATH = re.compile(
     r"log.?out|sign.?out|exit|delete|remove|cancel|save|update|submit|confirm|approve|apply|add|create"
     r"|insert|send|reset|clear|disable|enable|pay|del[A-Z/]",
     re.I,
 )
-EXPLORE_PATH = re.compile(r"form|list|main|index|book|rule|select|tree|field|client", re.I)
-EXPLORE_LIMIT = 25
+EXPLORE_PATH = re.compile(r"form|list|main|index|book|rule|select|tree|field|client|user|info", re.I)
+EXPLORE_LIMIT = 30
+# 旧版代码里出现过的页面，作为只读探查的起点
+EXPLORE_SEEDS = ("/a/field/client/main", "/a/field/book/bizFieldBookMain/form", "/a/field/book/bizFieldBookMain/list")
 MENTIONED_PATH = re.compile(r"""["'`(=](/a/[A-Za-z0-9_/.\-]+)""")
 LINKED_PATH = re.compile(r"""(?:href|src|data-href|data-url)=["'](/a/[^"'#?\s]+)""")
+# 页面脚本常写成 ctx + "/field/..."，ctx 就是 /a
+CTX_PATH = re.compile(r"""\bctx(?:Path|Admin)?\s*\+\s*["'`](/[A-Za-z0-9_/.\-]+)""")
 
 
 class ProbeError(Exception):
@@ -424,9 +426,9 @@ class Probe:
         self.section("6. 预订系统自身的登录")
         home = self._app_home()
         if home is None:
-            home = self._app_login(landing)
+            home = self._app_login()
         if home is None:
-            self.say("   没有找到能登录预订系统的入口")
+            self.say("   预订系统没有登录成功")
             return False
         self.say("   预订系统已登录")
 
@@ -435,9 +437,20 @@ class Probe:
         return True
 
     def _app_home(self) -> httpx.Response | None:
-        """已登录时主页直接返回 200；未登录会被重定向回落地页。"""
+        """已登录时主页直接返回 200；未登录会被重定向走。"""
         response = self.request("GET", BOOKING_HOME)
         return response if response.status_code == 200 else None
+
+    def _app_login(self) -> httpx.Response | None:
+        """走落地页上的 Login 按钮：/sso/login → ADFS（已有凭据时自动放行）→ /sso/code。"""
+        final = self.walk("GET", BOOKING_LOGIN)
+        if final.url.host == ADFS_HOST and has_password_form(final.text):
+            self.say("   ADFS 没有自动放行，重新提交凭据")
+            final = self._submit_adfs(final)
+        self.say(f"   停在 {final.url.host}{final.url.path}（{describe(final)}）")
+        if final.url.host == BOOKING_HOST and final.status_code == 200 and final.url.path.startswith("/a/"):
+            return final
+        return None
 
     def _scripts_of(self, page: httpx.Response, seen: set[str]) -> list[httpx.Response]:
         """抓取页面引用的、预订系统自己的脚本（跳过通用库）。"""
@@ -455,39 +468,10 @@ class Probe:
             fetched.append(script)
         return fetched
 
-    def _app_login(self, landing: httpx.Response) -> httpx.Response | None:
-        """在落地页和它的脚本里找登录入口，逐个试到主页能打开为止。"""
-        candidates: list[str] = []
-        for source in [landing, *self._scripts_of(landing, set())]:
-            for raw in LOGIN_URL.findall(source.text):
-                url = urljoin(str(source.url), raw)
-                if "/" not in raw or re.search(r"[${+]", raw) or STATIC_EXT.search(urlsplit(url).path):
-                    continue
-                if UNSAFE_PATH.search(urlsplit(url).path) or url in candidates:
-                    continue
-                candidates.append(url)
-        candidates += [url for guess in LOGIN_GUESSES if (url := urljoin(BOOKING, guess)) not in candidates]
-        self.say(f"   候选登录入口 {len(candidates)} 个：{' '.join(render_url(u) for u in candidates)}")
-
-        for url in candidates[:LOGIN_TRIES]:
-            try:
-                final = self.walk("GET", url)
-                if final.url.host == ADFS_HOST and has_password_form(final.text):
-                    self.say("   ADFS 没有自动放行，重新提交凭据")
-                    self._submit_adfs(final)
-            except ProbeError as exc:
-                self.say(f"     ↳ 放弃这个入口：{exc}")
-                continue
-            home = self._app_home()
-            if home is not None:
-                self.say(f"   有效入口：{render_url(url)}")
-                return home
-        return None
-
     def _explore(self, home: httpx.Response) -> None:
-        seen = {urlsplit(BOOKING_HOME).path}
+        seen = {home.url.path}
         scripts_seen: set[str] = set()
-        pending = self._report_page(home, scripts_seen)
+        pending = self._report_page(home, scripts_seen) + list(EXPLORE_SEEDS)
         visited = 0
         while pending and visited < EXPLORE_LIMIT:
             path = pending.pop(0)
@@ -497,24 +481,25 @@ class Probe:
             visited += 1
             page = self.request("GET", urljoin(BOOKING, path))
             self.say(f"     ↳ {describe(page)}")
-            if page.status_code != 200:
-                continue
-            if "html" in kind_of(page):
+            if page.status_code == 200 and "html" in kind_of(page):
                 pending.extend(p for p in self._report_page(page, scripts_seen) if p not in seen)
-            elif "json" in kind_of(page):
+            else:
                 self.keep(page)
-                self.say(f"     ↳ {shape(loads_or_empty(page.text))}")
+                if "json" in kind_of(page):
+                    self.say(f"     ↳ {shape(loads_or_empty(page.text))}")
 
     def _report_page(self, page: httpx.Response, scripts_seen: set[str]) -> list[str]:
         """记录页面里的路径和表单字段，返回值得继续只读访问的路径。"""
         self.keep(page)
         texts = [page.text] + [script.text for script in self._scripts_of(page, scripts_seen)]
-        mentioned = sorted({path for text in texts for path in MENTIONED_PATH.findall(text)})
-        self.say(f"     提到的 /a/ 路径 {len(mentioned)} 个：{' '.join(mentioned[:80])}")
+        mentioned = {path for text in texts for path in MENTIONED_PATH.findall(text)}
+        mentioned |= {"/a" + path for text in texts for path in CTX_PATH.findall(text)}
+        ordered = sorted(mentioned)
+        self.say(f"     提到的 /a/ 路径 {len(ordered)} 个：{' '.join(ordered[:120])}")
         for found in parse_forms(page.text):
             self.say(f"     表单 #{found.id or '?'} {found.method} → {urlsplit(found.action).path}: {found.describe_fields()}")
         linked = LINKED_PATH.findall(page.text)
-        worth = [p for p in mentioned if EXPLORE_PATH.search(p)]
+        worth = [p for p in ordered if EXPLORE_PATH.search(p)]
         return [p for p in dict.fromkeys(linked + worth)
                 if not UNSAFE_PATH.search(p) and not STATIC_EXT.search(p)]
 
