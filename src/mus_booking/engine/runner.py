@@ -15,7 +15,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 
 from ..domain import Outcome, State, next_opening, open_at
@@ -46,11 +46,14 @@ NOT_OPEN_WINDOW = 30.0
 """收到“尚未开放”后，每秒重试，最多持续这么久。"""
 NETWORK_RETRIES = 3
 TOO_FAST_RETRIES = 3
+SETTLE_AFTER = timedelta(minutes=10)
+"""提交后没收到答复、“我的预定”里也查不到，过了这么久才算失败。"""
 SWEEP_EVERY = 600.0
 BACKOFF_FIRST = 120.0
 BACKOFF_MAX = 3600.0
 
 Connect = Callable[[Iterable[dict[str, str]]], School]
+Prepared = dict[tuple, tuple[Form, float]]
 
 
 @dataclass
@@ -72,7 +75,17 @@ class Status:
     running: bool = False
     last_sweep: datetime | None = None
     last_error: str = ""
-    nights: dict[datetime, str] = field(default_factory=dict)
+
+
+@dataclass
+class _Workers:
+    """正在为各成员补交的任务。同一个成员同时只有一个。"""
+
+    tasks: dict[int, asyncio.Task[None]] = field(default_factory=dict)
+
+    def busy(self, member_id: int) -> bool:
+        task = self.tasks.get(member_id)
+        return task is not None and not task.done()
 
 
 class Engine:
@@ -84,6 +97,7 @@ class Engine:
         self._locks: dict[int, asyncio.Lock] = {}
         self._wake = asyncio.Event()
         self._backoff: dict[int, tuple[float, float]] = {}
+        self._workers = _Workers()
 
     # ---- 主循环 ---------------------------------------------------------------
 
@@ -94,11 +108,19 @@ class Engine:
         try:
             while True:
                 opening = next_opening(self.clock.now())
-                await self.night(opening)
+                try:
+                    await self.night(opening)
+                except Exception as error:  # 一晚出了意外，不能让整个后台任务停下
+                    log.exception("开抢时出错")
+                    self.status.last_error = f"{type(error).__name__}: {error}"
                 await self.clock.sleep_until(opening + timedelta(seconds=1))
         finally:
             self.status.running = False
             sweeper.cancel()
+            for task in self._workers.tasks.values():
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sweeper
 
     def poke(self) -> None:
         """有了变动，尽快检查一遍有没有需要立即提交的。"""
@@ -108,8 +130,8 @@ class Engine:
         while True:
             self._wake.clear()
             try:
-                await self.sweep()
-            except Exception as error:  # 后台任务不能因为一次意外而停下
+                self._dispatch()
+            except Exception as error:
                 log.exception("补交时出错")
                 self.status.last_error = f"{type(error).__name__}: {error}"
             with contextlib.suppress(TimeoutError):
@@ -123,85 +145,128 @@ class Engine:
         day = opening.date() + timedelta(days=1)
         members = [m for m in self.store.members() if m.login_ok and self._has_plans(m.id, day)]
         if not members:
+            await self.clock.sleep_until(opening)
+            self.poke()  # 20:55 以后才添加的预定，到点交给补交
             return
         self.store.start_run(opening, self.clock.now())
         log.info("%s 开抢：%d 位成员", opening.strftime("%m-%d %H:%M"), len(members))
-        work = asyncio.gather(*(self._night_for(m, opening) for m in members))
-        await self.clock.sleep_until(opening)
-        self.poke()  # 20:55 以后才添加预定的成员，到点交给补交处理
-        skews = await work
-        measured = [skew for skew in skews if skew is not None]
-        self.store.finish_run(opening, self.clock.now(), round(sum(measured) / len(measured)) if measured else None)
+        work = asyncio.gather(*(self._night_for(m.id, opening) for m in members), return_exceptions=True)
+        try:
+            await self.clock.sleep_until(opening)
+            self.poke()
+            results = await work
+        except BaseException:
+            work.cancel()
+            raise
+        skews = []
+        for result in results:
+            if isinstance(result, BaseException):
+                log.error("开抢时一个成员出错：%r", result)
+            elif result is not None:
+                skews.append(result)
+        self.store.finish_run(opening, self.clock.now(), round(sum(skews) / len(skews)) if skews else None)
+        self.poke()  # 开抢期间被搁下的补交
 
     def _has_plans(self, member_id: int, day: date) -> bool:
         return any(o.state is State.PLANNED for o in self.store.schedule(member_id).on(day))
 
-    async def _night_for(self, member: Member, opening: datetime) -> int | None:
-        """一个成员的一晚：登录、准备、开抢。返回与学校服务器的时间差（毫秒）。"""
-        async with self._lock(member.id):
-            account = None
-            for attempt in range(NETWORK_RETRIES):
-                account, retry = await self._sign_in(member.id, ignore_backoff=True)
-                if account or not retry or self.clock.now() >= opening:
-                    break
-                await self.clock.sleep(60.0 if attempt == 0 else 30.0)
-            if account is None:
-                return None
-            try:
-                await self.clock.sleep_until(opening - PREPARE_LEAD)
+    async def _night_for(self, member_id: int, opening: datetime) -> int | None:
+        """一个成员的一晚：登录、准备、开抢。返回与学校服务器的时间差（毫秒）。
+
+        登录之后到准备之前不占着这个成员，期间新加的当天预定照样能立即提交。
+        """
+        prepare_at = opening - PREPARE_LEAD
+        account, retry = await self._sign_in(member_id, ignore_backoff=True)
+        while account is None and retry and self.clock.now() < prepare_at:
+            await self.clock.sleep(min(60.0, max(1.0, (prepare_at - self.clock.now()).total_seconds())))
+            account, retry = await self._sign_in(member_id, ignore_backoff=True)
+        if account is None:
+            return None
+        try:
+            await self.clock.sleep_until(prepare_at)
+            async with self._lock(member_id):
+                if self.store.member(member_id) is None:
+                    return None
                 skew = await self._refresh(account)
                 prepared = await self._prepare(account, opening)
                 await self.clock.sleep_until(opening)
                 await self._work(account, prepared)
                 return skew
-            finally:
-                await self._sign_out(account)
+        finally:
+            await self._sign_out(account)
 
-    async def _prepare(self, account: _Account, opening: datetime) -> dict[tuple, tuple[Form, float]]:
-        """为开放时刻要提交的各段预先取好表单。取不到的到时候再取。"""
-        prepared: dict[tuple, tuple[Form, float]] = {}
+    async def _prepare(self, account: _Account, opening: datetime) -> Prepared:
+        """为开放时刻要提交的各段同时取好表单。到 21:00 还没取到的，到时候再取。"""
         day = opening.date() + timedelta(days=1)
-        for occurrence in self.store.schedule(account.member.id).on(day):
-            if occurrence.state is not State.PLANNED:
-                continue
-            for span in occurrence.span.split(account.profile.time_limit):
-                try:
-                    form = await account.school.form(account.profile, occurrence.room, day, span)
-                except PortalError as error:
-                    log.warning("成员 %s 预取表单失败：%s", account.member.id, error)
-                    continue
-                prepared[(occurrence.booking.id, day, occurrence.room, span)] = (form, self.clock.monotonic())
+        wanted = [
+            (occurrence, span)
+            for occurrence in self.store.schedule(account.member.id).on(day)
+            if occurrence.state is State.PLANNED
+            for span in occurrence.span.split(account.profile.time_limit)
+        ]
+        prepared: Prepared = {}
+
+        async def fetch(occurrence, span) -> None:
+            try:
+                form = await account.school.form(account.profile, occurrence.room, day, span)
+            except PortalError as error:
+                log.warning("成员 %s 预取表单失败：%s", account.member.id, error)
+                return
+            prepared[(occurrence.booking.id, day, occurrence.room, span)] = (form, self.clock.monotonic())
+
+        if wanted:
+            fetching = asyncio.ensure_future(asyncio.gather(*(fetch(o, s) for o, s in wanted)))
+            deadline = asyncio.ensure_future(self.clock.sleep_until(opening))
+            await asyncio.wait([fetching, deadline], return_when=asyncio.FIRST_COMPLETED)
+            deadline.cancel()
+            fetching.cancel()
         return prepared
 
     # ---- 补交 -----------------------------------------------------------------
 
-    async def sweep(self) -> None:
-        """立即提交所有已经开放、还没提交的预定，并处理上次没有完成的段。"""
+    def _candidates(self) -> list[int]:
         now = self.clock.now()
-        self.status.last_sweep = now
-        tasks = []
+        found = []
         for member in self.store.members():
-            if not member.login_ok or self._lock(member.id).locked():
+            if not member.login_ok or self._workers.busy(member.id) or self._lock(member.id).locked():
                 continue
-            if not self.store.schedule(member.id).due(now) and not self.store.unsettled(member.id):
-                continue
-            tasks.append(self._sweep_for(member.id))
-        await asyncio.gather(*tasks)
+            if self.store.schedule(member.id).due(now) or self.store.unsettled(member.id):
+                found.append(member.id)
+        return found
+
+    def _dispatch(self) -> list[asyncio.Task[None]]:
+        """为每个需要补交的成员各起一个任务，彼此不等待。"""
+        self.status.last_sweep = self.clock.now()
+        started = []
+        for member_id in self._candidates():
+            task = asyncio.create_task(self._sweep_for(member_id))
+            self._workers.tasks[member_id] = task
+            started.append(task)
+        return started
+
+    async def sweep(self) -> None:
+        """立即补交一遍，并等它做完。开机和测试时用。"""
+        tasks = self._dispatch()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _sweep_for(self, member_id: int) -> None:
-        async with self._lock(member_id):
-            account, _ = await self._sign_in(member_id)
-            if account is None:
-                return
-            try:
-                await self._refresh(account)
-                await self._work(account)
-            finally:
-                await self._sign_out(account)
+        try:
+            async with self._lock(member_id):
+                account, _ = await self._sign_in(member_id)
+                if account is None:
+                    return
+                try:
+                    await self._refresh(account)
+                    await self._work(account)
+                finally:
+                    await self._sign_out(account)
+        except Exception:
+            log.exception("为成员 %s 补交时出错", member_id)
 
     # ---- 提交 -----------------------------------------------------------------
 
-    async def _work(self, account: _Account, prepared: dict[tuple, tuple[Form, float]] | None = None) -> None:
+    async def _work(self, account: _Account, prepared: Prepared | None = None) -> None:
         """认领所有到期的预定，然后按时间先后逐段提交。"""
         member_id = account.member.id
         now = self.clock.now()
@@ -221,8 +286,8 @@ class Engine:
             if segment.outcome is Outcome.SENT:
                 await self._reconcile(account, segment)
                 continue
-            if segment.span.starts_on(segment.day) <= self.clock.now():
-                self.store.settle(segment.id, Outcome.FAILED, "时间已过", self.clock.now())
+            if self._started(segment):
+                self._fail(segment, "时间已过")
                 continue
             if not first:
                 await self.clock.sleep(GAP)
@@ -250,12 +315,17 @@ class Engine:
                 fetched = self.clock.monotonic()
             await self.clock.sleep(FORM_AGE - (self.clock.monotonic() - fetched))
             await self.clock.sleep_until(open_at(segment.day))
+            if self._started(segment):
+                return self._fail(segment, "时间已过")
             self.store.mark_sent(segment.id, form.booking_id, self.clock.now())
             try:
                 reply = await school.submit(profile, form, account.phone)
             except Uncertain:
-                return await self._reconcile(account, segment, form.booking_id)
+                sent = replace(segment, school_id=form.booking_id, sent_at=self.clock.now())
+                await self.clock.sleep(5.0)  # 给学校一点时间把这条记下来
+                return await self._reconcile(account, sent)
             except Unreachable as error:
+                self.store.requeue(segment.id)
                 network_failures += 1
                 if network_failures >= NETWORK_RETRIES:
                     return self._fail(segment, str(error))
@@ -265,6 +335,9 @@ class Engine:
                 self.store.settle(segment.id, Outcome.BOOKED, reply.message, self.clock.now())
                 log.info("成员 %s 订到 %s %s", account.member.id, segment.day, segment.span)
                 return None
+            if reply.verdict in (Verdict.TAKEN, Verdict.REJECTED):
+                return self._fail(segment, reply.message)
+            self.store.requeue(segment.id)
             if reply.verdict is Verdict.TOO_FAST:
                 too_fast += 1
                 if too_fast > TOO_FAST_RETRIES:
@@ -275,28 +348,33 @@ class Engine:
                 if self.clock.monotonic() - not_open_since >= NOT_OPEN_WINDOW:
                     return self._fail(segment, reply.message)
                 await self.clock.sleep(1.0)
-            elif reply.verdict is Verdict.STALE and not refetched:
+            elif not refetched:  # 表单失效：重新取一张，只重试一次
                 refetched, form = True, None
             else:
                 return self._fail(segment, reply.message)
 
-    async def _reconcile(self, account: _Account, segment: Claimed, school_id: str = "") -> None:
-        """提交后没收到答复：去“我的预定”里看这一段有没有订上。查不到时保持原状，下次再查。"""
-        school_id = school_id or segment.school_id
+    async def _reconcile(self, account: _Account, segment: Claimed) -> None:
+        """提交后没收到答复：去“我的预定”里看这一段有没有订上。
+
+        查到就算成功。查不到时先保持“已发出”，过一阵再查；超过一定时间仍查不到才算失败。
+        """
         try:
             records = await account.school.my_bookings()
         except PortalError as error:
             log.warning("成员 %s 核对“我的预定”失败：%s", account.member.id, error)
             return
-        found = any(
-            record.status == "2"
-            and ((school_id and record.id == school_id) or record.matches(segment.room_name, segment.day, segment.span))
-            for record in records
-        )
-        if found:
-            self.store.settle(segment.id, Outcome.BOOKED, "已在“我的预定”中确认", self.clock.now())
+        if segment.school_id:
+            found = any(record.id == segment.school_id and record.status == "2" for record in records)
         else:
+            found = any(record.matches(segment.room_name, segment.day, segment.span) for record in records)
+        now = self.clock.now()
+        if found:
+            self.store.settle(segment.id, Outcome.BOOKED, "已在“我的预定”中确认", now)
+        elif segment.sent_at is None or now - segment.sent_at >= SETTLE_AFTER or self._started(segment):
             self._fail(segment, "提交后没有收到答复，“我的预定”里也没有这一段")
+
+    def _started(self, segment: Claimed) -> bool:
+        return segment.span.starts_on(segment.day) <= self.clock.now()
 
     def _fail(self, segment: Claimed, message: str) -> None:
         self.store.settle(segment.id, Outcome.FAILED, message, self.clock.now())
@@ -312,21 +390,27 @@ class Engine:
         retry_at = self._backoff.get(member_id, (0.0, 0.0))[0]
         if not ignore_backoff and self.clock.monotonic() < retry_at:
             return None, True
-        credentials = self.store.credentials(member_id)
+        try:
+            credentials = self.store.credentials(member_id)
+        except KeyError:
+            return None, False
         school = self.connect(credentials.cookies)
         try:
             await school.sign_in(member.student_id, credentials.password)
             profile = self.store.profile(member_id) or await school.read_profile()
         except (LoginRejected, NeedsUser) as error:
-            await school.aclose()
             self.store.mark_login(member_id, False, str(error), credentials.version)
             log.warning("成员 %s 登录失效：%s", member_id, error)
+            await school.aclose()
             return None, False
         except PortalError as error:
-            await school.aclose()
             self._back_off(member_id)
             log.warning("成员 %s 暂时无法登录：%s", member_id, error)
+            await school.aclose()
             return None, True
+        except BaseException:
+            await school.aclose()
+            raise
         self._backoff.pop(member_id, None)
         self.store.save_cookies(member_id, school.cookies(), credentials.version)
         return _Account(member, school, profile, credentials.version), False
@@ -339,7 +423,8 @@ class Engine:
             log.warning("成员 %s 重读日历页失败，沿用上次的内容：%s", account.member.id, error)
             return None
         account.profile = profile
-        self.store.save_profile(account.member.id, profile, self.clock.now())
+        if self.store.member(account.member.id) is not None:
+            self.store.save_profile(account.member.id, profile, self.clock.now())
         if server_time is None:
             return None
         return round((server_time - self.clock.now()).total_seconds() * 1000)

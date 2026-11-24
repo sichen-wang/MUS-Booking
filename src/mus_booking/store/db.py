@@ -29,7 +29,7 @@ ADMIN_LINK_TTL = timedelta(minutes=15)
 
 _SCHEMA = """
 CREATE TABLE members (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     student_id TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
@@ -52,7 +52,7 @@ CREATE TABLE profiles (
     read_at TEXT NOT NULL
 );
 CREATE TABLE bookings (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
     room TEXT NOT NULL,
     start_min INTEGER NOT NULL,
@@ -70,7 +70,7 @@ CREATE TABLE skips (
     PRIMARY KEY (booking_id, day)
 );
 CREATE TABLE segments (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
     booking_id INTEGER NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
     day TEXT NOT NULL,
@@ -162,6 +162,7 @@ class Claimed:
     room_name: str
     outcome: Outcome
     school_id: str
+    sent_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -277,9 +278,12 @@ class Store:
         )
 
     def save_cookies(self, member_id: int, cookies: list[dict[str, str]], version: int) -> bool:
-        """后台登录之后保存新的凭据；如果期间用户重新登录过（版本变了），不覆盖。"""
+        """后台登录之后保存新的凭据；如果期间用户重新登录过（版本变了）或成员已被移除，不写。"""
         with self.transaction():
-            current = self.credentials(member_id)
+            try:
+                current = self.credentials(member_id)
+            except KeyError:
+                return False
             if current.version != version:
                 return False
             secret = self._vault.seal({"password": current.password, "cookies": cookies})
@@ -449,6 +453,10 @@ class Store:
             "UPDATE segments SET outcome = 'sent', school_id = ?, sent_at = ? WHERE id = ?",
             (school_id, _t(now), segment_id),
         )
+
+    def requeue(self, segment_id: int) -> None:
+        """学校明确拒绝了这一次尝试（还没开放、太快等），这一段回到排队中，重启后可以接着试。"""
+        self._db.execute("UPDATE segments SET outcome = 'queued' WHERE id = ? AND outcome = 'sent'", (segment_id,))
 
     def settle(self, segment_id: int, outcome: Outcome, message: str, now: datetime) -> None:
         self._db.execute(
@@ -657,4 +665,5 @@ def _claimed(row: sqlite3.Row) -> Claimed:
         room_name=row["room_name"],
         outcome=Outcome(row["outcome"]),
         school_id=row["school_id"],
+        sent_at=_maybe(row["sent_at"]),
     )

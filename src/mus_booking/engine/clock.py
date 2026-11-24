@@ -38,9 +38,9 @@ class SystemClock:
         await asyncio.sleep(max(0.0, seconds))
 
     async def sleep_until(self, moment: datetime) -> None:
-        # 分段睡，系统时间被校正时也不会睡过头
+        # 分段睡，系统时间被校正时也不会睡过头；临近目标时刻时看得更勤
         while (remaining := (moment - self.now()).total_seconds()) > 0:  # noqa: ASYNC110 等的是时刻，不是事件
-            await asyncio.sleep(min(remaining, 30.0))
+            await asyncio.sleep(min(remaining, 30.0 if remaining > 90 else 0.5))
 
 
 class VirtualClock:

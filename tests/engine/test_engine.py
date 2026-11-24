@@ -231,9 +231,63 @@ async def test_a_segment_left_sent_by_a_crash_is_reconciled(world):
         world.store.mark_sent(segment, school_id, world.clock.now())
 
     await world.clock.run(world.engine.sweep())
-
     assert world.outcomes(member) == [
         ("09:00–10:00", Outcome.BOOKED, "已在“我的预定”中确认"),
-        ("11:00–12:00", Outcome.FAILED, "提交后没有收到答复，“我的预定”里也没有这一段"),
+        ("11:00–12:00", Outcome.SENT, ""),  # 查不到时先等一等，学校可能还没记下来
     ]
+
+    world.clock.set(world.clock.now() + timedelta(minutes=11))
+    await world.clock.run(world.engine.sweep())
+    assert world.outcomes(member)[1] == ("11:00–12:00", Outcome.FAILED, "提交后没有收到答复，“我的预定”里也没有这一段")
     assert world.fake.submissions == []
+
+
+async def test_a_booking_added_after_an_empty_2055_still_goes_at_21(world):
+    member = await world.enroll()
+    engine = world.engine
+
+    async def scenario():
+        night = asyncio.ensure_future(engine.night(OPENING))
+        await world.clock.sleep_until(OPENING - timedelta(minutes=2))
+        world.book(member, "09:00-10:00")
+        await night
+        assert engine._wake.is_set()
+        await engine.sweep()
+
+    await world.clock.run(scenario())
+    assert world.outcomes(member) == [("09:00–10:00", Outcome.BOOKED, "保存成功")]
+    assert world.fake.submissions[0][0] - OPENING < timedelta(seconds=10)
+
+
+async def test_removing_a_member_during_the_night_does_not_break_the_run(world):
+    gone = await world.enroll("123000001")
+    stays = await world.enroll("123000002", name="周予安")
+    world.book(gone, "09:00-10:00")
+    world.book(stays, "09:00-10:00", room="room322")
+
+    async def scenario():
+        night = asyncio.ensure_future(world.engine.night(OPENING))
+        await world.clock.sleep_until(OPENING - timedelta(minutes=2))
+        world.store.remove_member(gone, world.clock.now())
+        await night
+
+    await world.clock.run(scenario())
+    assert [user for _, user, _ in world.fake.submissions] == ["123000002"]
+    assert world.outcomes(stays) == [("09:00–10:00", Outcome.BOOKED, "保存成功")]
+
+
+async def test_a_today_booking_added_at_2056_is_not_held_up_by_the_night(world):
+    member = await world.enroll()
+    world.book(member, "13:00-14:00")
+
+    async def scenario():
+        night = asyncio.ensure_future(world.engine.night(OPENING))
+        await world.clock.sleep_until(OPENING - timedelta(minutes=4))
+        world.book(member, "22:00-23:00", day=OPENING.date())
+        await world.engine.sweep()
+        assert world.clock.now() < OPENING - timedelta(minutes=3)
+        await night
+
+    await world.clock.run(scenario())
+    assert world.outcomes(member, OPENING.date()) == [("22:00–23:00", Outcome.BOOKED, "保存成功")]
+    assert world.outcomes(member) == [("13:00–14:00", Outcome.BOOKED, "保存成功")]
