@@ -1,0 +1,49 @@
+[project]
+name = "mus-booking"
+version = "3.0.0"
+description = "每晚 21:00 替音乐学院的同学预定琴房"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "cryptography>=44",
+    "fastapi>=0.115",
+    "httpx>=0.28",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.20",
+    "uvicorn>=0.32",
+]
+
+[project.scripts]
+mus-booking = "mus_booking.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+fonts = [
+    "brotli>=1.1",
+    "fonttools>=4.55",
+]
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mus_booking"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["tools/probe.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC"]
+# 中文文案里的全角标点是有意为之
+ignore = ["RUF001", "RUF002", "RUF003"]
