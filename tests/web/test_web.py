@@ -367,13 +367,21 @@ def test_everything_works_under_a_path_prefix():
     page = world.client.get("/?invite=abcd")
     links = re.findall(r'(?:href|action|src)="([^"]+)"', page.text)
     assert links and all(link.startswith("/booking/") for link in links)
-    # Caddy 的 handle_path 去掉前缀后再转发，所以服务收到的路径不带 /booking
-    assert world.client.get("/static/app.css").status_code == 200
-    assert world.client.get("/manifest.webmanifest").json()["start_url"] == "/booking/"
     response = world.client.post(
         "/bind", data={"code": world.invite(), "student_id": "123000001", "password": "right"}, follow_redirects=False
     )
     assert response.headers["location"] == "/booking/"
     assert "Path=/booking/" in response.headers["set-cookie"]
     assert "HttpOnly" in response.headers["set-cookie"]
+    world.store.close()
+
+
+def test_requests_forwarded_by_caddy_reach_pages_and_static_files():
+    """Caddy 的 handle_path 去掉 /booking 再转发；uvicorn 带着 --root-path 把前缀拼回路径，交给应用的是
+    root_path=/booking、path=/booking/...。测试客户端不会替我们拼，所以这里直接请求带前缀的路径。"""
+    world = World(root_path="/booking")
+    assert world.client.get("/booking/").status_code == 200
+    assert world.client.get("/booking/static/app.css").status_code == 200
+    assert world.client.get("/booking/static/fonts/serif-ui.woff2").status_code == 200
+    assert world.client.get("/booking/manifest.webmanifest").json()["start_url"] == "/booking/"
     world.store.close()
