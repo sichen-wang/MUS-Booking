@@ -1,0 +1,66 @@
+{% from "_icons.html" import icon %}
+{% set i = sheet.item %}
+{% set o = i.occurrence %}
+{% set state = o.state.value %}
+<div class="sheet-layer">
+  <a class="scrim" href="{{ u('/') }}" aria-label="关闭" tabindex="-1"></a>
+  <section class="sheet" role="dialog" aria-modal="true" aria-label="预定详情">
+    <div class="grip" aria-hidden="true"></div>
+    <div class="sheet-head">
+      <div class="sheet-date">{{ sheet.date }}</div>
+      <a class="close" href="{{ u('/') }}" aria-label="关闭">{{ icon('cross', 22) }}</a>
+    </div>
+    <div class="sheet-time{% if i.struck %} struck{% endif %}">{{ o.span }}</div>
+    <div class="sheet-room">
+      <span>{{ i.code }}{% if i.piano %} · {{ i.piano }}{% endif %}</span>
+      {% if state == 'submitted' and sheet.weekly %}<span class="repeat-label">{{ icon('repeat', 13) }}{{ sheet.weekly }}</span>{% endif %}
+    </div>
+
+    {% if state == 'submitted' %}
+    <div class="segments">
+      {% for s in sheet.segments %}
+      <div class="segment">
+        <span class="segment-time">{{ s.span }}</span>
+        <span class="segment-result tone-{{ s.tone }}">{% if s.tone == 'success' %}{{ icon('check', 14) }}{% elif s.tone == 'fail' %}{{ icon('cross', 14) }}{% endif %}{{ s.label }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="info">
+      {% if state == 'skipped' %}
+        {{ icon('skip', 18) }}<span class="info-text">已跳过</span>
+      {% elif state == 'paused' %}
+        {{ icon('pause', 18) }}<span class="info-text">已暂停</span>
+      {% elif i.badge and i.badge.tone == 'fail' %}
+        <span class="tone-fail">{{ icon('alert', 18) }}</span><span class="info-text">登录失效</span>
+      {% elif sheet.open_now %}
+        <span class="tone-accent">{{ icon('clock', 18) }}</span><span class="info-text">预定中</span>
+      {% else %}
+        <span class="tone-accent">{{ icon('clock', 18) }}</span><span class="info-text">{{ sheet.opens }} 自动预定</span>
+      {% endif %}
+      {% if sheet.weekly %}<span class="repeat-label">{{ icon('repeat', 13) }}{{ sheet.weekly }}</span>{% endif %}
+    </div>
+    {% endif %}
+
+    {% if sheet.error %}<p class="error" role="alert">{{ sheet.error }}</p>{% endif %}
+
+    {% if sheet.can_edit %}
+    <div class="actions">
+      {% if state == 'planned' and i.weekly %}
+      <form method="post" action="{{ u(sheet.path ~ '/skip') }}"><button class="action">{{ icon('skip') }}<span>跳过这一次</span></button></form>
+      {% elif state == 'skipped' %}
+      <form method="post" action="{{ u(sheet.path ~ '/unskip') }}"><button class="action accent">{{ icon('undo') }}<span>恢复这一次</span></button></form>
+      {% endif %}
+      {% if i.weekly %}
+        {% if o.booking.paused %}
+        <form method="post" action="{{ u(sheet.path ~ '/resume') }}"><button class="action accent">{{ icon('play') }}<span>恢复每周重复</span></button></form>
+        {% else %}
+        <form method="post" action="{{ u(sheet.path ~ '/pause') }}"><button class="action">{{ icon('pause') }}<span>暂停每周重复</span></button></form>
+        {% endif %}
+      {% endif %}
+      <a class="action" href="{{ u(sheet.path ~ '/edit') }}">{{ icon('pen') }}<span>修改时间或琴房</span></a>
+      <form method="post" action="{{ u(sheet.path ~ '/delete') }}"><button class="action danger" data-confirm="确认删除">{{ icon('trash') }}<span>删除</span></button></form>
+    </div>
+    {% endif %}
+  </section>
+</div>

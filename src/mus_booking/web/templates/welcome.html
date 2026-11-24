@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block body_class %}entry{% endblock %}
+{% block body %}
+<main class="page entry-page">
+  <div class="brand">
+    <img src="{{ static('icon.png') }}" alt="" width="28" height="28">
+    <span>MUS Booking</span>
+  </div>
+  <h1 class="hero">每晚 21:00，<br>替你定好琴房</h1>
+
+  <form class="fields" method="post" action="{{ u('/bind') }}" hx-disabled-elt="find button">
+    <label class="field">
+      <span class="field-label">邀请码</span>
+      <input name="code" value="{{ code }}" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="8" required>
+    </label>
+    <label class="field">
+      <span class="field-label">学号</span>
+      <input name="student_id" value="{{ values.get('student_id', '') }}" inputmode="numeric" autocomplete="username" required>
+    </label>
+    <label class="field">
+      <span class="field-label">密码</span>
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <label class="field">
+      <span class="field-label">电话</span>
+      <input name="phone" type="tel" value="{{ values.get('phone', '') }}" inputmode="numeric" autocomplete="tel" placeholder="选填">
+    </label>
+    <p class="reassure">{{ icon('lock', 16) }}<span>密码会加密保存在服务器上。</span></p>
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <div class="push"></div>
+    <button class="primary" type="submit"><span class="btn-label">开始使用</span><span class="spinner" aria-hidden="true"></span></button>
+    <p class="aside">已经绑定过？<a href="{{ u('/login') }}">直接登录</a></p>
+  </form>
+</main>
+{% endblock %}

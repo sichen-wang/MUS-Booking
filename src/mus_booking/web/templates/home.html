@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block body_class %}{% if sheet %}has-sheet{% endif %}{% endblock %}
+{% block body %}
+<main class="page home"{% if sheet %} aria-hidden="true"{% endif %}>
+  <header class="bar">
+    <a class="brand" href="{{ u('/') }}">
+      <img src="{{ static('icon.png') }}" alt="" width="28" height="28">
+      <span>MUS Booking</span>
+    </a>
+    <a class="avatar" href="{{ u('/account') }}" aria-label="账号">{{ initial }}</a>
+  </header>
+
+  {% if not member.login_ok %}
+  <a class="notice" href="{{ u('/account') }}">
+    {{ icon('alert', 18) }}<span class="notice-text">登录失效</span><span class="notice-link">重新登录</span>
+  </a>
+  {% endif %}
+
+  {% if next %}
+  <section class="next">
+    <div class="next-when">下一次自动预定 · {{ next.when }}</div>
+    <div class="next-what">{{ next.what }}</div>
+  </section>
+  {% endif %}
+
+  <section id="days" class="card days"{% if busy %} hx-get="{{ u('/') }}" hx-trigger="load delay:3s" hx-select="#days" hx-target="this" hx-swap="outerHTML" hx-push-url="false"{% endif %}>
+    {% for d in days %}
+    <div class="day{% if d.items|length == 1 %} single{% endif %}{% if not d.items %} empty{% endif %}">
+      <div class="day-name">
+        <div class="day-title">{{ d.name }}</div>
+        <div class="day-date">{{ d.date }}</div>
+      </div>
+      {% if d.items %}
+      <div class="entries">
+        {% for i in d.items %}
+        <a class="entry" href="{{ u('/b/%d/%s' % (i.booking_id, d.day)) }}">
+          <span class="entry-main">
+            <span class="entry-time{% if i.struck %} struck{% endif %}">{{ i.occurrence.span }}</span>
+            <span class="entry-room">{{ i.code }}{% if i.weekly %}<span class="repeat" role="img" aria-label="每周重复">{{ icon('repeat', 13) }}</span>{% endif %}</span>
+          </span>
+          {% if i.badge %}
+          <span class="badge badge-{{ i.badge.tone }}">{% if i.badge.tone == 'success' %}{{ icon('check', 14) }}{% endif %}{{ i.badge.label }}</span>
+          {% endif %}
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <a class="day-add" href="{{ u('/add?day=%s' % d.day) }}" aria-label="给{{ d.name }}添加预定">{{ icon('plus', 22) }}</a>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </section>
+
+  <a class="fab" href="{{ u('/add') }}" aria-label="添加预定">{{ icon('plus', 24) }}</a>
+</main>
+{% if sheet %}{% include "_sheet.html" %}{% endif %}
+{% endblock %}

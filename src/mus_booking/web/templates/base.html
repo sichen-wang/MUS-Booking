@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#F6F5F1">
+<meta name="htmx-config" content='{"scrollIntoViewOnBoost": false, "defaultSwapStyle": "innerHTML"}'>
+<title>{% block title %}MUS Booking{% endblock %}</title>
+<link rel="icon" type="image/png" href="{{ static('icon.png') }}">
+<link rel="apple-touch-icon" href="{{ static('icon.png') }}">
+<link rel="manifest" href="{{ u('/manifest.webmanifest') }}">
+<link rel="stylesheet" href="{{ static('fonts.css') }}">
+<link rel="stylesheet" href="{{ static('app.css') }}">
+<script src="{{ static('htmx.min.js') }}" defer></script>
+<script src="{{ static('app.js') }}" defer></script>
+</head>
+<body hx-boost="true" class="{% block body_class %}{% endblock %}">
+{% block body %}{% endblock %}
+</body>
+</html>

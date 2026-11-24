@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}管理 · MUS Booking{% endblock %}
+{% block body_class %}wide{% endblock %}
+{% block body %}
+<main class="admin">
+  <header class="admin-bar">
+    <img src="{{ static('icon.png') }}" alt="" width="28" height="28">
+    <span class="brand-name">MUS Booking</span>
+    <span class="tag">管理</span>
+    <span class="spacer"></span>
+    {% if has_member %}<a class="admin-back" href="{{ u('/') }}">回到我的预定</a>{% endif %}
+  </header>
+
+  <section class="overview">
+    <div>
+      <div class="next-when">下一次自动预定 · {{ opens }}</div>
+      <div class="next-what">{{ summary }}</div>
+    </div>
+    <div class="health {{ 'ok' if healthy else 'bad' }}"><span class="dot"></span>{{ '服务运行正常' if healthy else '后台任务没有运行' }}</div>
+  </section>
+
+  <section class="card panel">
+    <div class="panel-head"><h2>成员</h2><span class="count">{{ rows|length }} 人</span></div>
+    {% if rows %}
+    <div class="table-scroll">
+      <table class="members">
+        <thead><tr><th>成员</th><th>登录状态</th><th>预定</th><th>当前状态</th><th aria-label="操作"></th></tr></thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td><div class="who">{{ r.member.name or '—' }}</div><div class="sid">{{ r.member.student_id }}</div></td>
+            <td>{% if r.member.login_ok %}<span class="pill pill-success">正常</span>{% else %}<span class="pill pill-fail">登录失效</span>{% endif %}</td>
+            <td class="{{ '' if r.planned else 'muted' }}">{{ '%d 个时段' % r.planned if r.planned else '无' }}</td>
+            <td>{% if r.booked or r.failed %}
+              {%- if r.booked %}{{ r.booked }} 个时段预定成功{% endif %}
+              {%- if r.booked and r.failed %}，{% endif %}
+              {%- if r.failed %}<span class="tone-fail">{{ r.failed }} 个时段预定失败</span>{% endif %}
+            {%- else %}<span class="muted">—</span>{% endif %}</td>
+            <td class="actions-cell">
+              <form method="post" action="{{ u('/admin/members/%d/remove' % r.member.id) }}"><button class="small" data-confirm="确认移除">移除</button></form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty-note">暂无</p>
+    {% endif %}
+  </section>
+
+  <div class="panels">
+    <section class="card panel">
+      <div class="panel-head">
+        <h2>邀请码</h2>
+        <form method="post" action="{{ u('/admin/invites') }}"><button class="solid">生成邀请码</button></form>
+      </div>
+      {% for invite, note in invites %}
+      <div class="invite{% if not invite.usable %} used{% endif %}">
+        <div class="invite-main">
+          <div class="code">{{ invite.code }}</div>
+          <div class="note">{{ note }}</div>
+        </div>
+        {% if invite.usable %}
+        <button class="small" type="button" data-copy="{{ invite_url }}{{ invite.code }}">{{ icon('copy', 14) }}<span>复制链接</span></button>
+        <form method="post" action="{{ u('/admin/invites/%s/void' % invite.code) }}"><button class="small danger">作废</button></form>
+        {% endif %}
+      </div>
+      {% else %}
+      <p class="empty-note">暂无</p>
+      {% endfor %}
+    </section>
+
+    <section class="card panel">
+      <div class="panel-head"><h2>日志</h2></div>
+      {% for day in log %}
+      <div class="log-day"><span>{{ day.title }}</span>{% if day.took %}<span>{{ day.took }}</span>{% endif %}</div>
+      {% for e in day.entries %}
+      <div class="log-line">
+        <span class="who">{{ e.member_name or '—' }}</span>
+        <span>{% if e.booked %}{{ e.booked }} 个时段预定成功{% endif %}{% if e.booked and e.failed %}，{% endif %}{% if e.failed %}<span class="tone-fail">{{ e.failed }} 个时段预定失败</span>{% endif %}</span>
+      </div>
+      {% endfor %}
+      {% else %}
+      <p class="empty-note">暂无</p>
+      {% endfor %}
+    </section>
+  </div>
+</main>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}账号 · MUS Booking{% endblock %}
+{% block body %}
+<main class="page form-page">
+  <a class="back" href="{{ u('/') }}" aria-label="返回">{{ icon('back', 24) }}</a>
+  <h1 class="title">{{ member.name or '账号' }}</h1>
+
+  <div class="group">
+    <div class="row">
+      <span class="row-label">学号</span>
+      <span class="row-value mono">{{ member.student_id }}</span>
+    </div>
+    <form class="row" method="post" action="{{ u('/account/phone') }}">
+      <label class="row-label" for="phone">电话</label>
+      <input class="row-input" id="phone" name="phone" type="tel" value="{{ member.phone }}" inputmode="numeric" autocomplete="tel" placeholder="选填">
+      <button class="row-button" type="submit">保存</button>
+    </form>
+  </div>
+
+  <div class="label">学校密码</div>
+  <form class="group" method="post" action="{{ u('/account/password') }}" hx-disabled-elt="find button">
+    {% if not member.login_ok %}
+    <div class="row warn">{{ icon('alert', 18) }}<span>登录失效</span></div>
+    {% endif %}
+    <div class="row">
+      <input class="row-input wide" name="password" type="password" autocomplete="current-password" placeholder="密码" aria-label="学校密码" required>
+      <button class="row-button" type="submit"><span class="btn-label">更新</span><span class="spinner" aria-hidden="true"></span></button>
+    </div>
+  </form>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if saved %}<p class="saved" role="status">{{ icon('check', 14) }}{{ saved }}</p>{% endif %}
+
+  {% if admin %}
+  <a class="group row link" href="{{ u('/admin') }}"><span class="row-label">管理</span><span class="row-chevron">{{ icon('back', 18) }}</span></a>
+  {% endif %}
+
+  <div class="push"></div>
+  <form method="post" action="{{ u('/logout') }}">
+    <button class="quiet danger" type="submit">退出登录</button>
+  </form>
+</main>
+{% endblock %}

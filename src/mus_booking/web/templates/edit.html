@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}{{ '修改预定' if editing else '添加预定' }} · MUS Booking{% endblock %}
+{% block body %}
+<main class="page form-page">
+  <a class="back" href="{{ u(back) }}" aria-label="返回">{{ icon('back', 24) }}</a>
+  <h1 class="title">{{ '修改预定' if editing else '添加预定' }}</h1>
+
+  <form class="booking" method="post" action="{{ u(action) }}" hx-disabled-elt="find button[type=submit]">
+    <div class="label">日期</div>
+    <div class="dates" role="radiogroup" aria-label="日期">
+      {% for value, name, number in dates %}
+      <label class="date">
+        <input type="radio" name="day" value="{{ value }}"{% if value == day %} checked{% endif %}>
+        <span class="date-name">{{ name }}</span>
+        <span class="date-number">{{ number }}</span>
+      </label>
+      {% endfor %}
+    </div>
+
+    <div class="label">时间</div>
+    <div class="times">
+      <label class="picker time">
+        <span class="picker-tag">开始</span>
+        <span class="picker-value" data-show="start">{{ start }}</span>
+        <span class="picker-chevron">{{ icon('down', 16) }}</span>
+        <select name="start" aria-label="开始时间">
+          {% for t in starts %}<option{% if t == start %} selected{% endif %}>{{ t }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="picker time">
+        <span class="picker-tag">结束</span>
+        <span class="picker-value" data-show="end">{{ end }}</span>
+        <span class="picker-chevron">{{ icon('down', 16) }}</span>
+        <select name="end" aria-label="结束时间">
+          {% for t in ends %}<option{% if t == end %} selected{% endif %}>{{ t }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="chips durations">
+      {% for hours in (1, 2, 3, 4) %}
+      <button type="button" class="chip" data-hours="{{ hours }}">{{ hours }} 小时</button>
+      {% endfor %}
+    </div>
+
+    <div class="label">琴房</div>
+    <label class="picker room">
+      {% set current = (rooms | selectattr('id', 'equalto', room) | first) or (rooms | first) %}
+      <span class="room-code" data-show="room-code">{{ current.code if current else '' }}</span>
+      <span class="room-piano" data-show="room-piano">{{ current.piano if current else '' }}</span>
+      <span class="picker-chevron">{{ icon('down', 16) }}</span>
+      <select name="room" aria-label="琴房">
+        {% for r in rooms %}
+        <option value="{{ r.id }}" data-code="{{ r.code }}" data-piano="{{ r.piano }}"{% if current and r.id == current.id %} selected{% endif %}>{{ r.code }}{% if r.piano %} · {{ r.piano }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% if quick %}
+    <div class="chips rooms">
+      {% for r in quick %}<button type="button" class="chip" data-room="{{ r.id }}">{{ r.code }}</button>{% endfor %}
+    </div>
+    {% endif %}
+
+    <label class="switch-row">
+      <span>每周重复</span>
+      <input class="switch" type="checkbox" name="weekly" role="switch"{% if weekly %} checked{% endif %}>
+    </label>
+
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <div class="push"></div>
+    <button class="primary" type="submit"><span class="btn-label">{{ '保存' if editing else '添加' }}</span><span class="spinner" aria-hidden="true"></span></button>
+  </form>
+</main>
+{% endblock %}

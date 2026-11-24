@@ -1,0 +1,21 @@
+{% macro icon(name, size=20) -%}
+<svg class="icon icon-{{ name }}" width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{%- if name == "repeat" -%}<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>
+{%- elif name == "check" -%}<path d="M5 12.5l4.5 4.5L19 7.5"/>
+{%- elif name == "cross" -%}<path d="M18 6L6 18M6 6l12 12"/>
+{%- elif name == "plus" -%}<path d="M12 5v14M5 12h14"/>
+{%- elif name == "back" -%}<path d="M15 18l-6-6 6-6"/>
+{%- elif name == "down" -%}<path d="M6 9l6 6 6-6"/>
+{%- elif name == "clock" -%}<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+{%- elif name == "skip" -%}<path d="M5 4l10 8-10 8V4z"/><path d="M19 5v14"/>
+{%- elif name == "pause" -%}<path d="M9 5v14M15 5v14"/>
+{%- elif name == "play" -%}<path d="M7 4.5v15l12-7.5-12-7.5z"/>
+{%- elif name == "undo" -%}<path d="M1 4v6h6"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/>
+{%- elif name == "pen" -%}<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+{%- elif name == "trash" -%}<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>
+{%- elif name == "lock" -%}<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>
+{%- elif name == "copy" -%}<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>
+{%- elif name == "alert" -%}<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5"/><path d="M12 16.5h.01"/>
+{%- endif -%}
+</svg>
+{%- endmacro %}

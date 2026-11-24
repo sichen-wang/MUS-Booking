@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}登录 · MUS Booking{% endblock %}
+{% block body_class %}entry{% endblock %}
+{% block body %}
+<main class="page entry-page">
+  <div class="brand">
+    <img src="{{ static('icon.png') }}" alt="" width="28" height="28">
+    <span>MUS Booking</span>
+  </div>
+  <h1 class="hero">登录</h1>
+
+  <form class="fields" method="post" action="{{ u('/login') }}" hx-disabled-elt="find button">
+    <label class="field">
+      <span class="field-label">学号</span>
+      <input name="student_id" value="{{ values.get('student_id', '') }}" inputmode="numeric" autocomplete="username" required>
+    </label>
+    <label class="field">
+      <span class="field-label">密码</span>
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <div class="push"></div>
+    <button class="primary" type="submit"><span class="btn-label">登录</span><span class="spinner" aria-hidden="true"></span></button>
+    <p class="aside">第一次使用？<a href="{{ u('/') }}">绑定账号</a></p>
+  </form>
+</main>
+{% endblock %}

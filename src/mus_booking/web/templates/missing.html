@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}页面不存在 · MUS Booking{% endblock %}
+{% block body_class %}entry{% endblock %}
+{% block body %}
+<main class="page entry-page">
+  <div class="brand">
+    <img src="{{ static('icon.png') }}" alt="" width="28" height="28">
+    <span>MUS Booking</span>
+  </div>
+  <h1 class="hero">页面不存在</h1>
+  <div class="push"></div>
+  <a class="primary" href="{{ u('/') }}">回到首页</a>
+</main>
+{% endblock %}
