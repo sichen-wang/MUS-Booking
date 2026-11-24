@@ -140,10 +140,10 @@ class Occurrence:
             return tuple(segment.span for segment in self.segments if segment.holds_time)
         return ()
 
-    def minutes(self, today: date) -> int:
-        """计入每周时长的分钟数。今天以前没提交的计划已经错过，不计。"""
+    def minutes(self, now: datetime) -> int:
+        """计入每周时长的分钟数。已经结束却没有提交的计划不会再提交，不计。"""
         if self.state is State.PLANNED:
-            return self.span.minutes if self.day >= today else 0
+            return self.span.minutes if self.span.ends_on(self.day) > now else 0
         return sum(span.minutes for span in self.holds())
 
 
@@ -212,13 +212,16 @@ class Schedule:
 
     # ---- 校验 -----------------------------------------------------------------
 
-    def week_minutes(self, week: date, today: date) -> int:
-        return sum(o.minutes(today) for day in days(monday(week), 7) for o in self.on(day))
+    def week_minutes(self, week: date, now: datetime) -> int:
+        return sum(o.minutes(now) for day in days(monday(week), 7) for o in self.on(day))
 
-    def problem(self, booking_id: int, today: date) -> str | None:
+    def problem(self, booking_id: int, now: datetime) -> str | None:
         """这条预定在接下来几周里会不会与别的预定重叠，或让某一周超过 60 小时。"""
+        booking = self.booking(booking_id)
+        if booking is None:
+            return None
         weeks: set[date] = set()
-        for day in days(today, _CHECK_DAYS):
+        for day in days(max(now.astimezone(CHINA).date(), booking.first), _CHECK_DAYS):
             occurrences = self.on(day)
             for mine in occurrences:
                 if mine.booking.id != booking_id or mine.state is not State.PLANNED:
@@ -227,7 +230,7 @@ class Schedule:
                 for other in occurrences:
                     if other is not mine and any(span.overlaps(mine.span) for span in other.holds()):
                         return "时间与已有的预定重叠"
-        if any(self.week_minutes(week, today) > WEEKLY_LIMIT for week in sorted(weeks)):
+        if any(self.week_minutes(week, now) > WEEKLY_LIMIT for week in sorted(weeks)):
             return "超过每周 60 小时"
         return None
 
@@ -279,7 +282,8 @@ def rehomed_skips(schedule: Schedule, old: Booking, kept: Booking | None, new: B
     """修改之后，旧预定上要删掉的跳过日期，以及要转给新预定的跳过日期。"""
     mine = {day for owner, day in schedule.skips if owner == old.id}
     if kept is None:
-        return {day for day in mine if not new.occurs_on(day)}, set()
+        # 改成单次预定时，这一天是用户特意选的，原先的跳过不再适用
+        return {day for day in mine if not (new.weekly and new.occurs_on(day))}, set()
     assert kept.last is not None
     later = {day for day in mine if day > kept.last}
-    return later, {day for day in later if new.occurs_on(day)}
+    return later, {day for day in later if new.weekly and new.occurs_on(day)}

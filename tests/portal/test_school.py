@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 import pytest
 
 from mus_booking.domain import CHINA, Span
-from mus_booking.portal import LoginRejected, NeedsUser, Uncertain, Unexpected, Unreachable, Verdict
+from mus_booking.portal import LoginRejected, NeedsUser, Uncertain, Unreachable, Verdict
 from mus_booking.portal.fake import FakeSchool
 
 pytestmark = pytest.mark.anyio
@@ -54,8 +54,9 @@ async def test_verifying_a_password_refuses_to_lean_on_saved_cookies(fake):
         await school.sign_in("123000001", "right")
         cookies = school.cookies()
     async with fake.school(cookies) as school:
-        with pytest.raises(Unexpected, match="没有要求输入密码"):
+        with pytest.raises(LoginRejected):
             await school.sign_in("123000001", "wrong", verify_password=True)
+    assert fake.password_checks == 2
 
 
 async def test_a_changed_password_is_rejected_even_with_saved_cookies(fake):

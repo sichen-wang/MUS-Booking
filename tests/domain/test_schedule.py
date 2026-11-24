@@ -20,6 +20,7 @@ TUE = date(2026, 11, 24)  # 星期二
 WED = TUE + timedelta(days=1)
 THU = TUE + timedelta(days=2)
 NEXT_TUE = TUE + timedelta(days=7)
+START = datetime(2026, 11, 24, 0, 0, tzinfo=CHINA)
 
 
 def span(text: str) -> Span:
@@ -133,12 +134,12 @@ def test_the_day_after_tomorrow_is_never_due():
 
 def test_overlap_with_a_planned_booking():
     trial = Schedule(bookings=(booking(1, "13:00-15:00", WED), booking(2, "14:00-16:00", WED)))
-    assert trial.problem(2, TUE) == "时间与已有的预定重叠"
+    assert trial.problem(2, START) == "时间与已有的预定重叠"
 
 
 def test_back_to_back_bookings_do_not_overlap():
     trial = Schedule(bookings=(booking(1, "13:00-15:00", WED), booking(2, "15:00-17:00", WED)))
-    assert trial.problem(2, TUE) is None
+    assert trial.problem(2, START) is None
 
 
 def test_failed_segments_free_their_time_and_booked_ones_hold_it():
@@ -146,13 +147,13 @@ def test_failed_segments_free_their_time_and_booked_ones_hold_it():
     segments = (segment(1, TUE, "13:00-15:00", Outcome.FAILED), segment(1, TUE, "15:00-17:00"))
     retry = booking(2, "13:00-15:00", TUE, room="r2")
     clash = booking(3, "16:00-17:00", TUE, room="r2")
-    assert Schedule(bookings=(base, retry), segments=segments).problem(2, TUE) is None
-    assert Schedule(bookings=(base, clash), segments=segments).problem(3, TUE) == "时间与已有的预定重叠"
+    assert Schedule(bookings=(base, retry), segments=segments).problem(2, START) is None
+    assert Schedule(bookings=(base, clash), segments=segments).problem(3, START) == "时间与已有的预定重叠"
 
 
 def test_a_weekly_series_clashes_with_a_one_off_on_its_weekday():
     trial = Schedule(bookings=(booking(1, "09:00-11:00", NEXT_TUE), booking(2, "10:00-12:00", TUE, weekly=True)))
-    assert trial.problem(2, TUE) == "时间与已有的预定重叠"
+    assert trial.problem(2, START) == "时间与已有的预定重叠"
 
 
 def test_paused_and_skipped_occurrences_do_not_block():
@@ -162,8 +163,8 @@ def test_paused_and_skipped_occurrences_do_not_block():
         bookings=(paused, skipped, booking(3, "09:00-11:00", TUE), booking(4, "13:00-15:00", WED)),
         skips=frozenset({(2, WED)}),
     )
-    assert trial.problem(3, TUE) is None
-    assert trial.problem(4, TUE) is None
+    assert trial.problem(3, START) is None
+    assert trial.problem(4, START) is None
 
 
 def test_hours_already_used_earlier_in_the_week_count():
@@ -178,22 +179,22 @@ def test_hours_already_used_earlier_in_the_week_count():
     ) + tuple(segment(b.id, b.first, "14:00-14:30") for b in used)
     candidate = booking(99, "09:00-12:00", friday, room="r9")
     trial = Schedule(bookings=(*used, candidate), segments=segments)
-    assert trial.week_minutes(friday, friday) == 58 * 60 + 180
-    assert trial.problem(99, friday) == "超过每周 60 小时"
-    assert trial.with_bookings(booking(99, "09:00-11:00", friday)).problem(99, friday) is None
+    assert trial.week_minutes(friday, china(friday, "00:00")) == 58 * 60 + 180
+    assert trial.problem(99, china(friday, "00:00")) == "超过每周 60 小时"
+    assert trial.with_bookings(booking(99, "09:00-11:00", friday)).problem(99, china(friday, "00:00")) is None
 
 
 def test_weekly_series_that_add_up_past_60_hours_are_rejected():
     full_days = [booking(i, "00:00-23:30", TUE + timedelta(days=i), weekly=True) for i in range(2)]
     extra = booking(9, "08:00-22:00", TUE + timedelta(days=3), weekly=True)  # 47 + 14 = 61
     trial = Schedule(bookings=(*full_days, extra))
-    assert trial.problem(9, TUE) == "超过每周 60 小时"
-    assert trial.with_bookings(booking(9, "08:00-21:00", extra.first, weekly=True)).problem(9, TUE) is None
+    assert trial.problem(9, START) == "超过每周 60 小时"
+    assert trial.with_bookings(booking(9, "08:00-21:00", extra.first, weekly=True)).problem(9, START) is None
 
 
 def test_missed_plans_before_today_do_not_count():
     trial = Schedule(bookings=(booking(1, "00:00-23:30", TUE - timedelta(days=1)),))
-    assert trial.week_minutes(TUE, TUE) == 0
+    assert trial.week_minutes(TUE, START) == 0
 
 
 # ---- 修改与删除 ----------------------------------------------------------------
@@ -260,3 +261,24 @@ def test_skips_follow_the_edit():
     unsubmitted = Schedule(bookings=(old,), skips=frozenset({(5, NEXT_TUE)}))
     kept, moved = revise(unsubmitted, old, booking(0, "14:00-16:00", WED, weekly=True))
     assert rehomed_skips(unsubmitted, old, kept, moved) == ({NEXT_TUE}, set())
+
+
+def test_an_ended_plan_that_was_never_submitted_frees_its_hours():
+    ended = booking(1, "09:00-10:00", TUE)
+    schedule = Schedule(bookings=(ended,))
+    assert schedule.week_minutes(TUE, china(TUE, "09:30")) == 60
+    assert schedule.week_minutes(TUE, china(TUE, "12:00")) == 0
+
+
+def test_turning_a_series_into_a_one_off_on_a_skipped_day_drops_the_skip():
+    old = booking(5, "13:00-15:00", TUE, weekly=True)
+    schedule = Schedule(bookings=(old,), skips=frozenset({(5, NEXT_TUE)}))
+    kept, new = revise(schedule, old, booking(0, "13:00-15:00", NEXT_TUE))
+    assert rehomed_skips(schedule, old, kept, new) == ({NEXT_TUE}, set())
+
+
+def test_a_series_starting_beyond_three_weeks_is_still_checked():
+    far = TUE + timedelta(days=28)
+    first = booking(1, "10:00-12:00", far, weekly=True)
+    second = booking(2, "11:00-13:00", far, weekly=True)
+    assert Schedule(bookings=(first, second)).problem(2, START) == "时间与已有的预定重叠"

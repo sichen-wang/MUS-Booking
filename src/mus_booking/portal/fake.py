@@ -304,6 +304,11 @@ class FakeSchool:
             for b in self.bookings
         ):
             reply = {"success": False, "message": "手速太慢，该时间段已经被预订啦"}
+        elif any(
+            b.student_id == user and b.day == token.day and b.span.overlaps(token.span) and b.status == "2"
+            for b in self.bookings
+        ):
+            reply = {"success": False, "message": "该时间段您已有预订"}
         elif not form.get("theme") or not form.get("userPhone"):
             reply = {"success": False, "message": "请填写完整的预订信息"}
         else:
@@ -330,7 +335,10 @@ class FakeSchool:
             for b in sorted(self.bookings, key=lambda b: b.created, reverse=True)
             if b.student_id == user
         ]
-        return _json(request, {"data": rows, "meta": {"page": 1, "pages": 1, "total": len(rows)}})
+        form = dict(parse_qsl(request.content.decode()))
+        page, per = int(form.get("pagination[page]", "1")), int(form.get("pagination[perpage]", "10"))
+        meta = {"page": page, "pages": max(1, -(-len(rows) // per)), "perpage": per, "total": len(rows)}
+        return _json(request, {"data": rows[(page - 1) * per : page * per], "meta": meta})
 
 
 # ---- 工具 ---------------------------------------------------------------------

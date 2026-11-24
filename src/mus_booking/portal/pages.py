@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
+from html import unescape
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import quote
@@ -181,7 +182,7 @@ def home(html: str) -> Home:
     if not user_id:
         raise Unexpected("学校首页上没有找到用户编号")
     name = _USER_NAME.search(html)
-    return Home(user_id.group(1), re.sub(r"\s+", " ", name.group(1)).strip() if name else "")
+    return Home(user_id.group(1), unescape(re.sub(r"\s+", " ", name.group(1)).strip()) if name else "")
 
 
 def entry(html: str) -> tuple[str, str]:

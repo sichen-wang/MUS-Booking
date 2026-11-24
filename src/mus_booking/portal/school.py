@@ -209,7 +209,9 @@ class School:
         要求整个过程中学校确实核对过密码，否则视为失败，以免沿用的凭据替一个错误的密码作保。
         """
         checked = False
-        if not verify_password:
+        if verify_password:
+            self._client.cookies.clear()
+        else:
             home = await self._send("GET", f"{BOOKING}/a/system/main")
             if home.status_code == 200 and home.url.host == BOOKING_HOST:
                 return pages.home(home.text)
@@ -259,7 +261,11 @@ class School:
         if result.url.host == ADFS_HOST:
             if pages.asks_extra_auth(result.text):
                 raise NeedsUser("学校要求额外的身份验证")
-            raise LoginRejected(pages.login_error(result.text) or "学号或密码不正确")
+            if message := pages.login_error(result.text):
+                raise LoginRejected(message)
+            if result.status_code == 429 or result.status_code >= 500:
+                raise Unreachable(f"学校的统一认证暂时不可用（HTTP {result.status_code}）")
+            raise Unexpected("学校的统一认证没有放行，也没有说明原因")
         return result
 
     async def _finish_gateway(self, landing: httpx.Response) -> None:
@@ -399,11 +405,15 @@ class School:
                     "Referer": f"{BOOKING}/a/field/client/main",
                 },
                 timeout=SUBMIT_TIMEOUT,
+                follow_redirects=False,
             )
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as error:
             raise Unreachable(f"连不上学校的服务器（{type(error).__name__}）") from error
         except httpx.HTTPError as error:
             raise Uncertain(f"提交后没有收到答复（{type(error).__name__}）") from error
+        if response.status_code >= 500:
+            # 网关报错时学校可能已经保存了这条预定，不能当作失败
+            raise Uncertain(f"提交后学校的服务器出错（HTTP {response.status_code}）")
         return classify(response.status_code, response.text)
 
     async def my_bookings(self, count: int = 30) -> list[Record]:
@@ -444,7 +454,9 @@ class School:
         if target.scheme != "https" or not (target.hostname or "").endswith(ALLOWED_SUFFIX):
             raise Unexpected(f"学校的页面把请求引向了别处（{target.hostname}），已停止")
         try:
-            return await self._client.request(method, url, data=data, json=json_body, headers=headers)
+            return await self._client.request(
+                method, url, data=data, json=json_body, headers=headers, follow_redirects=False
+            )
         except httpx.HTTPError as error:
             raise Unreachable(f"连不上学校的服务器（{type(error).__name__}）") from error
 
@@ -498,7 +510,8 @@ class School:
         )
         if response.status_code in _REDIRECTS:
             raise Unexpected("场地系统的登录已失效")
-        if response.status_code >= 500 and not path.startswith("/a/field/client/bookForm"):
+        # 预定表单的参数不对时学校返回 500，那是我们的问题，不该当作网络故障重试
+        if response.status_code > 500 or (response.status_code == 500 and "/bookForm" not in path):
             raise Unreachable(f"场地系统出错了（HTTP {response.status_code}）")
         return response
 
