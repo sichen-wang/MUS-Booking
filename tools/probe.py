@@ -42,7 +42,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit
 
 import httpx
 
@@ -90,12 +90,17 @@ READ_ONLY_POSTS = {
     "/a/field/client/main",
     "/a/field/book/bizFieldBookMainMe/listData",
 }
-# 仅用于探测时挑出要细看的场地类型：名字或所属部门像琴房、音乐学院的
-TYPE_HINT = re.compile(r"琴房|piano|practice|音乐|music", re.I)
-# 旧版代码里的 extend1，读页面后得知它是场地类型“学生琴房”的编号；列表里找不到时用它兜底
+# 旧版代码里的 extend1，读页面后得知它是场地类型“学生琴房”的编号；探测时最先看它
 KNOWN_TYPE = "af15efadc379429885681cbad7b1ec12"
-TYPE_LIMIT = 3
+TYPE_HINT = re.compile(r"琴房|practice room", re.I)  # 其次看名字像琴房的可预定类型
+TYPE_LIMIT = 2
 TYPE_PAGES = 40
+# 日历页脚本里拼接“预检”和“预定表单”地址的表达式；参数值是服务器按类型渲染的，照抄最稳妥
+PRECHECK_EXPR = re.compile(r"(?s)('/a/field/book/bizFieldBookMain/validateBlack\?.+?),\s*cache")
+BOOK_FORM_EXPR = re.compile(r"(?s)('/a/field/client/bookForm\?.+?)\]")
+NO_PERMISSION = re.compile(r"if\s*\(([^{]{0,60})\)\s*\{\s*layer\.msg\('您没有预定")
+SERVER_NOW = re.compile(r"new Date\((\d{13})\)")
+CALENDAR_FACT = re.compile(r"\b(slotMinTime|slotMaxTime|slotDuration|validRange)\s*:\s*([^,\n]{0,80})")
 GROUP = re.compile(r"refreshGrp\('([^']*)','([^']*)','([^']*)','([^']*)'\)")
 ROOM = re.compile(r"id:\s*'([0-9a-zA-Z]+)',\s*fname:\s*'([^']*)'")
 RULE = re.compile(r"saveData\?reBookMainId=[^&\"']*&ruleId=([0-9a-zA-Z]*)")
@@ -204,6 +209,20 @@ def describe(response: httpx.Response) -> str:
     if title and title.group(1).strip():
         text += f" 标题「{title.group(1).strip()[:40]}」"
     return text
+
+
+def render_expr(expr: str, values: dict[str, str]) -> tuple[str, list[str]]:
+    """把页面脚本里 'a=' + x + '&b=' 这样的拼接表达式代入取值；返回结果和没认出的变量名。"""
+    out, unknown = "", []
+    for part in re.split(r"\s*\+\s*", expr.strip()):
+        part = part.strip()
+        if part[:1] in "'\"":
+            out += part.strip("'\"")
+        elif part in values:
+            out += quote(values[part])
+        elif part:
+            unknown.append(part)
+    return out, unknown
 
 
 def render_url(url: str) -> str:
@@ -377,8 +396,9 @@ class Probe:
     def booking(self, method: str, path: str, *, params: dict[str, str] | None = None,
                 data: dict[str, str] | None = None) -> httpx.Response:
         """只读地调用预订系统的一个接口，并把原文存下来。会改动数据的接口在这里被拦住。"""
-        if UNSAFE_PATH.search(path) or (method != "GET" and path not in READ_ONLY_POSTS):
-            raise ProbeError(f"探测脚本拒绝调用可能改动数据的接口：{method} {path}")
+        route = path.split("?", 1)[0]
+        if UNSAFE_PATH.search(route) or (method != "GET" and route not in READ_ONLY_POSTS):
+            raise ProbeError(f"探测脚本拒绝调用可能改动数据的接口：{method} {route}")
         url = urljoin(BOOKING, path) + (f"?{urlencode(params)}" if params else "")
         headers = {"X-Requested-With": "XMLHttpRequest", "Referer": BOOKING_HOME}
         response = self.request(method, url, data=data, headers=headers)
@@ -516,13 +536,11 @@ class Probe:
             self.say(f"   {row.get('id')} · {row.get('nameZh')} · {row.get('deptName')} · "
                      f"bookFlag={row.get('bookFlag')} haveAuth={row.get('haveAuth')} haveRule={row.get('haveRule')}")
 
-        chosen = [row for row in bookable
-                  if TYPE_HINT.search(f"{row.get('nameZh')} {row.get('nameEn')} {row.get('deptName')} {row.get('deptNameEng')}")]
-        if not chosen:
-            self.say("   可预定的类型里没有像琴房的，改用旧版代码里的类型编号")
-            chosen = [next((row for row in types if row.get("id") == KNOWN_TYPE),
-                           {"id": KNOWN_TYPE, "nameZh": "旧版代码里的类型编号", "bookFlag": 1})]
-        for row in chosen[:TYPE_LIMIT]:
+        known = next((row for row in types if row.get("id") == KNOWN_TYPE),
+                     {"id": KNOWN_TYPE, "nameZh": "旧版代码里的类型编号（列表里没有）", "bookFlag": 1})
+        alike = [row for row in bookable
+                 if row.get("id") != KNOWN_TYPE and TYPE_HINT.search(f"{row.get('nameZh')} {row.get('nameEn')}")]
+        for row in [known, *alike][:TYPE_LIMIT]:
             self._discover_type(row)
 
         self.section("7. 我的预定（只读列表）")
@@ -546,7 +564,11 @@ class Probe:
         self.say(f"   personTag={tag} · ruleId={f'{len(rule)} 位' if rule else '没有找到'} · 琴房 {len(rooms)} 间")
         self.say(f"   琴房：{'、'.join(name for _, name in rooms[:80])}")
         self.say(f"   页面顶部的用户组下拉：{len(set(GROUP.findall(text)))} 项")
-        for name, value in dict.fromkeys(PAGE_VAR.findall(text)):
+        self.say(f"   “没有权限”的判断条件：{first_group(NO_PERMISSION, text).strip() or '页面里没有'}")
+        rendered = first_group(SERVER_NOW, text)
+        if rendered:
+            self.say(f"   页面里的服务器时间与本机相差 {int(rendered) / 1000 - time.time():+.1f}s")
+        for name, value in dict.fromkeys(PAGE_VAR.findall(text) + CALENDAR_FACT.findall(text)):
             self.say(f"   页面变量 {name} = {value.strip()}")
         for found in parse_forms(text):
             self.say(f"   表单 #{found.id or '?'} {found.method} → {urlsplit(found.action).path}: {found.describe_fields()}")
@@ -578,16 +600,25 @@ class Probe:
         hour = max(now.hour + 1, 12)  # 今天挑一个白天、还没过去的整点
         if hour <= 21:
             slots = {"今天": (f"{now:%Y-%m-%d} {hour:02d}:00", f"{now:%Y-%m-%d} {hour + 1:02d}:00"), **slots}
+        precheck_expr = first_group(PRECHECK_EXPR, text)
+        form_expr = first_group(BOOK_FORM_EXPR, text)
+        if not precheck_expr or not form_expr:
+            self.say("   页面里没有找到预检或预定表单的地址模板，后面的步骤跳过")
+            return
         for label, (start, end) in slots.items():
-            query = {
-                "fId": rooms[0][0], "bizFieldBookField.startTime": start, "bizFieldBookField.endTime": end,
-                "repFlag": "1", "bookType": "", "userTag": tag, "approvalFlag": "0", "extend2": "",
-                "bookedNum": "0", "fitBook": "false", "isDeptAdmin": "false", "adMost": "",
-            }
-            check = self.booking("GET", "/a/field/book/bizFieldBookMain/validateBlack", params=query)
-            self.say(f"     ↳ {label} {start[11:]}–{end[11:]} 预检：{decoded(check)[:300]}")
-            form = self.booking("GET", "/a/field/client/bookForm", params=query)
-            self.say(f"     ↳ {label} 的预定表单：{describe(form)}")
+            values = {"fid": rooms[0][0], "startTime": start, "endTime": end, "bookedNum": "0", "isFitBook": "false"}
+            precheck_url, unknown = render_expr(precheck_expr, values)
+            form_url, unknown_form = render_expr(form_expr, values)
+            if unknown or unknown_form:
+                self.say(f"   地址模板里有没认出的变量：{sorted(set(unknown + unknown_form))}")
+            check = self.booking("GET", precheck_url)
+            result = loads_or_empty(decoded(check))
+            summary = (f"success={result.get('success')!r} message={result.get('message')!r}"
+                       if isinstance(result, dict) and result else decoded(check)[:200])
+            self.say(f"     ↳ {label} {start[11:]}–{end[11:]} 预检：{summary}")
+            form = self.booking("GET", form_url)
+            self.say(f"     ↳ {label} 的预定表单：{describe(form)}"
+                     + ("" if form.status_code == 200 else f" {decoded(form)[:160]}"))
             for found in parse_forms(decoded(form)):
                 self.say(f"       表单 #{found.id or '?'} {found.method} → {urlsplit(found.action).path}: {found.describe_fields()}")
 
