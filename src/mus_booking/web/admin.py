@@ -102,7 +102,7 @@ async def page(request: Request) -> Response:
         "admin.html",
         opens=views.moment_name(opening, now),
         summary=f"{len(waiting)} 位成员 · {sum(r.planned for r in waiting)} 个时段" if waiting else "暂无",
-        healthy=status.running and not status.last_error,
+        healthy=status.running,
         rows=rows,
         invites=[(invite, _invite_note(invite)) for invite in store.invites()],
         invite_url=f"{str(request.base_url).rstrip('/')}/?invite=",

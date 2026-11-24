@@ -20,7 +20,7 @@ import httpx
 
 from ..domain import Room, Span, hhmm
 from . import pages
-from .errors import LoginRejected, NeedsUser, PortalError, Uncertain, Unexpected, Unreachable
+from .errors import LoginRejected, NeedsUser, PortalError, SessionLost, Uncertain, Unexpected, Unreachable
 
 ADFS_HOST = "sts.cuhk.edu.cn"
 ATRUST = "https://atrust.cuhk.edu.cn"
@@ -509,7 +509,7 @@ class School:
             headers={"X-Requested-With": "XMLHttpRequest", "Referer": f"{BOOKING}/a/system/main"},
         )
         if response.status_code in _REDIRECTS:
-            raise Unexpected("场地系统的登录已失效")
+            raise SessionLost("场地系统的登录已失效")
         # 预定表单的参数不对时学校返回 500，那是我们的问题，不该当作网络故障重试
         if response.status_code > 500 or (response.status_code == 500 and "/bookForm" not in path):
             raise Unreachable(f"场地系统出错了（HTTP {response.status_code}）")

@@ -21,5 +21,9 @@ class NeedsUser(PortalError):
     """学校要求额外的验证，或者需要密码而没有保存。必须由用户本人处理。"""
 
 
+class SessionLost(PortalError):
+    """场地系统的登录在途中失效了。重新登录一次之后可以接着做。"""
+
+
 class Unexpected(PortalError):
     """学校页面的结构与已知的不一致，可能是学校改了系统。"""

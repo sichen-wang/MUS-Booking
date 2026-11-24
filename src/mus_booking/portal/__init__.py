@@ -1,6 +1,6 @@
 """学校场地系统：登录、读取可预定的内容、提交预定。"""
 
-from .errors import LoginRejected, NeedsUser, PortalError, Uncertain, Unexpected, Unreachable
+from .errors import LoginRejected, NeedsUser, PortalError, SessionLost, Uncertain, Unexpected, Unreachable
 from .school import DEFAULT_PHONE, Form, Profile, Record, Reply, School, Verdict, classify
 
 __all__ = [
@@ -13,6 +13,7 @@ __all__ = [
     "Record",
     "Reply",
     "School",
+    "SessionLost",
     "Uncertain",
     "Unexpected",
     "Unreachable",

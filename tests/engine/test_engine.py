@@ -291,3 +291,68 @@ async def test_a_today_booking_added_at_2056_is_not_held_up_by_the_night(world):
     await world.clock.run(scenario())
     assert world.outcomes(member, OPENING.date()) == [("22:00–23:00", Outcome.BOOKED, "保存成功")]
     assert world.outcomes(member) == [("13:00–14:00", Outcome.BOOKED, "保存成功")]
+
+
+async def test_an_outage_that_ends_just_before_21_still_books_at_the_opening(world):
+    member = await world.enroll()
+    world.book(member, "09:00-10:00")
+    world.fake.down = True
+
+    async def scenario():
+        night = asyncio.ensure_future(world.engine.night(OPENING))
+        await world.clock.sleep_until(OPENING - timedelta(seconds=1))
+        world.fake.down = False
+        await night
+
+    await world.clock.run(scenario())
+    assert world.outcomes(member) == [("09:00–10:00", Outcome.BOOKED, "保存成功")]
+    assert world.fake.submissions[0][0] - OPENING < timedelta(seconds=30)
+
+
+async def test_a_session_that_expires_after_2055_is_renewed_before_preparing(world):
+    member = await world.enroll()
+    world.book(member, "09:00-10:00")
+
+    async def scenario():
+        night = asyncio.ensure_future(world.engine.night(OPENING))
+        await world.clock.sleep_until(OPENING - timedelta(minutes=2))
+        world.fake.expire_sessions()
+        await night
+
+    await world.clock.run(scenario())
+    assert world.outcomes(member) == [("09:00–10:00", Outcome.BOOKED, "保存成功")]
+    assert world.fake.submissions[0][0] == OPENING
+
+
+async def test_removing_a_member_mid_run_stops_their_remaining_segments(world):
+    member = await world.enroll()
+    world.book(member, "13:00-19:00")
+
+    async def scenario():
+        night = asyncio.ensure_future(world.engine.night(OPENING))
+        await world.clock.sleep_until(OPENING + timedelta(milliseconds=500))
+        world.store.remove_member(member, world.clock.now())
+        await night
+
+    await world.clock.run(scenario())
+    assert len(world.fake.submissions) == 1
+
+
+async def test_a_booking_added_while_a_sweep_is_busy_gets_picked_up_right_after(world):
+    member = await world.enroll()
+    world.clock.set(OPENING + timedelta(minutes=30))
+    world.book(member, "20:00-21:00")
+    engine = world.engine
+
+    async def scenario():
+        first = asyncio.ensure_future(engine.sweep())
+        await world.clock.sleep(1.0)  # 第一段还在等表单满 2 秒
+        world.book(member, "22:00-23:00")
+        engine._wake.clear()
+        engine._dispatch()  # 相当于新加预定时的 poke：成员正忙，这次扫不到
+        await first
+        assert engine._wake.is_set()  # 做完之后会再扫一遍
+        await engine.sweep()
+
+    await world.clock.run(scenario())
+    assert [o for _, o, _ in world.outcomes(member)] == [Outcome.BOOKED, Outcome.BOOKED]

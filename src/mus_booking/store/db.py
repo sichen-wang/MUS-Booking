@@ -300,9 +300,6 @@ class Store:
     def set_phone(self, member_id: int, phone: str) -> None:
         self._db.execute("UPDATE members SET phone = ? WHERE id = ?", (phone, member_id))
 
-    def set_name(self, member_id: int, name: str) -> None:
-        self._db.execute("UPDATE members SET name = ? WHERE id = ?", (name, member_id))
-
     def remove_member(self, member_id: int, now: datetime) -> None:
         with self.transaction():
             self._db.execute(
@@ -448,11 +445,14 @@ class Store:
                 ids.append(int(cursor.lastrowid or 0))
             return ids
 
-    def mark_sent(self, segment_id: int, school_id: str, now: datetime) -> None:
-        self._db.execute(
-            "UPDATE segments SET outcome = 'sent', school_id = ?, sent_at = ? WHERE id = ?",
+    def mark_sent(self, segment_id: int, school_id: str, now: datetime) -> bool:
+        """发出之前标记。这一段已经不在（例如成员刚被移除）时返回假，调用方不应再发。"""
+        cursor = self._db.execute(
+            "UPDATE segments SET outcome = 'sent', school_id = ?, sent_at = ?"
+            " WHERE id = ? AND outcome IN ('queued', 'sent')",
             (school_id, _t(now), segment_id),
         )
+        return cursor.rowcount == 1
 
     def requeue(self, segment_id: int) -> None:
         """学校明确拒绝了这一次尝试（还没开放、太快等），这一段回到排队中，重启后可以接着试。"""
@@ -525,12 +525,6 @@ class Store:
         if now - seen > timedelta(hours=1):
             self._db.execute("UPDATE sessions SET seen_at = ? WHERE token_hash = ?", (_t(now), _hash(token)))
         return Session(row["member_id"], bool(row["admin"]))
-
-    def update_session(self, token: str, *, member_id: int | None = None, admin: bool | None = None) -> None:
-        if member_id is not None:
-            self._db.execute("UPDATE sessions SET member_id = ? WHERE token_hash = ?", (member_id, _hash(token)))
-        if admin is not None:
-            self._db.execute("UPDATE sessions SET admin = ? WHERE token_hash = ?", (int(admin), _hash(token)))
 
     def drop_session(self, token: str) -> None:
         self._db.execute("DELETE FROM sessions WHERE token_hash = ?", (_hash(token),))

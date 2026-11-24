@@ -6,12 +6,12 @@
 
 ## 安装
 
-服务器需要能访问学校的系统。先装好 uv，再用它在仓库里建立虚拟环境；虚拟环境使用系统自带的 Python 3.12，这样以服务账号运行时不依赖 root 的家目录。
+服务器需要能访问学校的系统。先装好 uv，再用它在仓库里建立虚拟环境；虚拟环境使用系统自带的 Python 3.12，这样以服务账号运行时不依赖 root 的家目录。新版合并到 `main` 之前在 `dev` 分支上，克隆时要指定这个分支。
 
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh
 useradd --system --home /opt/mus-booking --shell /usr/sbin/nologin mus-booking
-git clone https://github.com/sichen-wang/MUS-Booking.git /opt/mus-booking
+git clone --branch dev https://github.com/sichen-wang/MUS-Booking.git /opt/mus-booking
 cd /opt/mus-booking
 UV_PYTHON_PREFERENCE=only-system ~/.local/bin/uv sync --frozen --no-dev
 .venv/bin/mus-booking check
@@ -30,7 +30,7 @@ nano /etc/mus-booking/env
 sudo -u mus-booking sh -c 'set -a; . /etc/mus-booking/env; /opt/mus-booking/.venv/bin/mus-booking init'
 ```
 
-`init` 生成密钥文件并建好数据库；密钥文件已经存在时不会覆盖。
+`init` 生成密钥文件并建好数据库；密钥文件已经存在时不会覆盖。systemd 单元把整个文件系统设为只读，只放开 `/var/lib/mus-booking`，所以数据目录不要改到别处；确实要改时，同时修改单元里的 `ReadWritePaths` 和 `StateDirectory`。
 
 ## 启动服务
 
@@ -74,7 +74,14 @@ systemctl restart mus-booking
 
 避开 20:50 到 21:05 之间重启。重启后服务会自动补交已经开放而还没提交的预定。
 
-需要备份的是 `/var/lib/mus-booking/mus-booking.db` 和 `/etc/mus-booking/secret.key`。两者应分开存放：只拿到数据库的人看不到任何密码，丢了密钥则保存的密码都无法解开，同学需要重新登录一次。
+需要备份的是数据库和 `/etc/mus-booking/secret.key`。数据库开着 WAL，最近的写入可能还在旁边的 `-wal` 文件里，直接复制 `.db` 文件会漏掉它们，要用 SQLite 自己的备份命令：
+
+```sh
+apt install sqlite3
+sqlite3 /var/lib/mus-booking/mus-booking.db ".backup '/root/mus-booking-backup.db'"
+```
+
+数据库和密钥应分开存放：只拿到数据库的人看不到任何密码，丢了密钥则保存的密码都无法解开，同学需要重新登录一次。
 
 ## 时间
 

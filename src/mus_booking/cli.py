@@ -147,7 +147,7 @@ def _check(_: argparse.Namespace) -> int:
                     f"{ATRUST_COMMON['clientType']}&platform={ATRUST_COMMON['platform']}&lang=zh-CN",
                     lambda r: r.status_code == 200 and "code" in r.text,
                 ),
-                ("场地系统", f"{BOOKING}/", lambda r: r.status_code < 500),
+                ("场地系统", f"{BOOKING}/", lambda r: r.status_code == 200 and r.url.host.endswith(".cuhk.edu.cn")),
             )
             for label, url, good in checks:
                 started = time.monotonic()

@@ -27,6 +27,7 @@ from ..portal import (
     PortalError,
     Profile,
     School,
+    SessionLost,
     Uncertain,
     Unreachable,
     Verdict,
@@ -38,6 +39,8 @@ log = logging.getLogger("mus_booking.engine")
 
 LOGIN_LEAD = timedelta(minutes=5)
 PREPARE_LEAD = timedelta(seconds=30)
+LOGIN_GRACE = timedelta(minutes=2)
+"""学校在开放前后一直连不上时，登录重试到开放之后这么久。"""
 FORM_AGE = 2.2
 """取到表单后至少等这么多秒再提交（学校要求 2 秒，多留一点余量）。"""
 GAP = 1.0
@@ -98,6 +101,7 @@ class Engine:
         self._wake = asyncio.Event()
         self._backoff: dict[int, tuple[float, float]] = {}
         self._workers = _Workers()
+        self._missed: set[int] = set()
 
     # ---- 主循环 ---------------------------------------------------------------
 
@@ -177,15 +181,17 @@ class Engine:
         """
         prepare_at = opening - PREPARE_LEAD
         account, retry = await self._sign_in(member_id, ignore_backoff=True)
-        while account is None and retry and self.clock.now() < prepare_at:
-            await self.clock.sleep(min(60.0, max(1.0, (prepare_at - self.clock.now()).total_seconds())))
+        while account is None and retry and self.clock.now() < opening + LOGIN_GRACE:
+            now = self.clock.now()
+            pause = min(60.0, (prepare_at - now).total_seconds()) if now < prepare_at else 10.0
+            await self.clock.sleep(max(1.0, pause))
             account, retry = await self._sign_in(member_id, ignore_backoff=True)
         if account is None:
             return None
         try:
             await self.clock.sleep_until(prepare_at)
             async with self._lock(member_id):
-                if self.store.member(member_id) is None:
+                if self.store.member(member_id) is None or not await self._resign(account):
                     return None
                 skew = await self._refresh(account)
                 prepared = await self._prepare(account, opening)
@@ -228,10 +234,15 @@ class Engine:
         now = self.clock.now()
         found = []
         for member in self.store.members():
-            if not member.login_ok or self._workers.busy(member.id) or self._lock(member.id).locked():
+            if not member.login_ok:
                 continue
-            if self.store.schedule(member.id).due(now) or self.store.unsettled(member.id):
-                found.append(member.id)
+            if not (self.store.schedule(member.id).due(now) or self.store.unsettled(member.id)):
+                continue
+            if self._workers.busy(member.id) or self._lock(member.id).locked():
+                # 这次扫不到；等它手上的活做完再扫一遍，免得新加的预定要等到下一轮
+                self._missed.add(member.id)
+                continue
+            found.append(member.id)
         return found
 
     def _dispatch(self) -> list[asyncio.Task[None]]:
@@ -263,6 +274,10 @@ class Engine:
                     await self._sign_out(account)
         except Exception:
             log.exception("为成员 %s 补交时出错", member_id)
+        finally:
+            if member_id in self._missed:
+                self._missed.discard(member_id)
+                self.poke()
 
     # ---- 提交 -----------------------------------------------------------------
 
@@ -283,6 +298,8 @@ class Engine:
             )
         first = True
         for segment in self.store.unsettled(member_id):
+            if self.store.member(member_id) is None:
+                return
             if segment.outcome is Outcome.SENT:
                 await self._reconcile(account, segment)
                 continue
@@ -298,12 +315,17 @@ class Engine:
         school, profile = account.school, account.profile
         form, fetched = ready if ready else (None, 0.0)
         not_open_since: float | None = None
-        refetched = False
+        refetched = resigned = False
         network_failures = too_fast = 0
         while True:
             if form is None:
                 try:
                     form = await school.form(profile, segment.room, segment.day, segment.span)
+                except SessionLost as error:
+                    if resigned or not await self._resign(account):
+                        return self._fail(segment, str(error))
+                    resigned = True
+                    continue
                 except Unreachable as error:
                     network_failures += 1
                     if network_failures >= NETWORK_RETRIES:
@@ -317,7 +339,8 @@ class Engine:
             await self.clock.sleep_until(open_at(segment.day))
             if self._started(segment):
                 return self._fail(segment, "时间已过")
-            self.store.mark_sent(segment.id, form.booking_id, self.clock.now())
+            if not self.store.mark_sent(segment.id, form.booking_id, self.clock.now()):
+                return None  # 这一段已经不在了（成员被移除），不再提交
             try:
                 reply = await school.submit(profile, form, account.phone)
             except Uncertain:
@@ -359,7 +382,7 @@ class Engine:
         查到就算成功。查不到时先保持“已发出”，过一阵再查；超过一定时间仍查不到才算失败。
         """
         try:
-            records = await account.school.my_bookings()
+            records = await account.school.my_bookings(100)
         except PortalError as error:
             log.warning("成员 %s 核对“我的预定”失败：%s", account.member.id, error)
             return
@@ -414,6 +437,23 @@ class Engine:
         self._backoff.pop(member_id, None)
         self.store.save_cookies(member_id, school.cookies(), credentials.version)
         return _Account(member, school, profile, credentials.version), False
+
+    async def _resign(self, account: _Account) -> bool:
+        """在已有的会话上再确认一次登录；会话还有效时只是一次很快的请求。"""
+        try:
+            credentials = self.store.credentials(account.member.id)
+        except KeyError:
+            return False
+        try:
+            await account.school.sign_in(account.member.student_id, credentials.password)
+        except (LoginRejected, NeedsUser) as error:
+            self.store.mark_login(account.member.id, False, str(error), credentials.version)
+            log.warning("成员 %s 登录失效：%s", account.member.id, error)
+            return False
+        except PortalError as error:
+            log.warning("成员 %s 重新登录失败：%s", account.member.id, error)
+            return False
+        return True
 
     async def _refresh(self, account: _Account) -> int | None:
         """重读日历页，更新规则编号和琴房清单。返回学校服务器与本机的时间差（毫秒）。"""
