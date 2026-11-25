@@ -51,6 +51,8 @@ journalctl -u mus-booking -f
 docker exec new-api-caddy caddy reload --config /etc/caddy/Caddyfile
 ```
 
+这台服务器上的 Caddyfile 是以单个文件挂载进容器的。单文件挂载跟随的是文件本身而不是路径，像 `sed -i` 那样先写新文件再改名的保存方式会让容器继续读到旧内容，因此要原地写入，写完先用 `docker exec new-api-caddy caddy validate --config /etc/caddy/Caddyfile` 校验，再重新加载。上线时改动前的原文件备份为 `/opt/new-api/Caddyfile.bak-20261125-before-mus-booking`。
+
 `handle_path` 会去掉地址里的 `/booking`，服务启动时的 `--root-path /booking` 再把它补回到页面上的每个链接里，两者必须一致。Caddy 默认会带上 `X-Forwarded-For` 和 `X-Forwarded-Proto`，服务只信任来自本机的这两个头。
 
 ## 开始使用
