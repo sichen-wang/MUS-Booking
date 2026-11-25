@@ -2,6 +2,7 @@
 
 import asyncio
 import itertools
+import random
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -9,7 +10,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from mus_booking.domain import CHINA, Booking, Outcome, Span, State
-from mus_booking.engine import Engine, VirtualClock
+from mus_booking.engine import Engine, Pace, VirtualClock
 from mus_booking.portal.fake import Booked, FakeSchool
 from mus_booking.store import Store, Vault
 
@@ -17,6 +18,15 @@ pytestmark = pytest.mark.anyio
 
 OPENING = datetime(2026, 11, 25, 21, 0, tzinfo=CHINA)
 TOMORROW = date(2026, 11, 26)
+FIRST = timedelta(seconds=4.5)
+GAP = timedelta(seconds=3.5)
+
+
+class Midpoint(random.Random):
+    """随机数总取正中：第一段在开放后 4.5 秒，之后每段隔 3.5 秒，同一档里的先后保持时间顺序。"""
+
+    def random(self) -> float:
+        return 0.5
 
 
 @dataclass
@@ -42,12 +52,16 @@ class World:
     def outcomes(self, member: int, day=TOMORROW) -> list[tuple[str, Outcome, str]]:
         return [(str(s.span), s.outcome, s.message) for o in self.store.schedule(member).on(day) for s in o.segments]
 
+    def starts(self) -> list[str]:
+        """各次提交的开始时间，按提交的先后。"""
+        return [start[11:16] for _, _, start in self.fake.submissions]
+
 
 def make_world(start: datetime) -> World:
     clock = VirtualClock(start)
     fake = FakeSchool(now=clock.now)
     store = Store.open(":memory:", Vault(Fernet.generate_key()))
-    return World(clock, fake, store, Engine(store, clock, fake.school))
+    return World(clock, fake, store, Engine(store, clock, fake.school, pace=Pace(Midpoint())))
 
 
 @pytest.fixture
@@ -57,7 +71,7 @@ def world():
     world.store.close()
 
 
-async def test_a_night_books_every_segment_at_21_with_a_second_between(world):
+async def test_a_night_books_every_segment_at_a_quick_human_pace(world):
     member = await world.enroll()
     world.book(member, "13:00-19:00")
     checks_before = world.fake.password_checks
@@ -69,26 +83,72 @@ async def test_a_night_books_every_segment_at_21_with_a_second_between(world):
         ("15:00–17:00", Outcome.BOOKED),
         ("17:00–19:00", Outcome.BOOKED),
     ]
+    assert world.starts() == ["17:00", "13:00", "15:00"]  # 跨在 18:00 上的一段算晚上，先订
     times = [at for at, _, _ in world.fake.submissions]
-    assert len(times) == 3
-    assert times[0] == OPENING
-    assert all(later - earlier >= timedelta(seconds=1) for earlier, later in itertools.pairwise(times))
-    assert times[-1] - OPENING < timedelta(seconds=5)
+    assert times[0] == OPENING + FIRST
+    assert all(later - earlier >= GAP for earlier, later in itertools.pairwise(times))
     assert world.fake.password_checks == checks_before
     (run,) = world.store.runs()
     assert run.finished_at is not None
 
 
-async def test_two_members_go_at_the_same_moment(world):
+async def test_members_do_not_wait_for_each_other(world):
     first = await world.enroll("123000001")
     second = await world.enroll("123000002", name="周予安")
     world.book(first, "09:00-11:00", room="room321")
     world.book(second, "09:00-11:00", room="room322")
     await world.clock.run(world.engine.night(OPENING))
     assert sorted((user, at) for at, user, _ in world.fake.submissions) == [
-        ("123000001", OPENING),
-        ("123000002", OPENING),
+        ("123000001", OPENING + FIRST),
+        ("123000002", OPENING + FIRST),
     ]
+
+
+async def test_evenings_go_first_then_afternoons_then_mornings(world):
+    member = await world.enroll()
+    world.book(member, "08:00-10:00", room="room321")
+    world.book(member, "13:00-15:00", room="room322")
+    world.book(member, "19:00-21:00")
+    await world.clock.run(world.engine.night(OPENING))
+    assert world.starts() == ["19:00", "13:00", "08:00"]
+
+
+async def test_within_a_part_of_the_day_the_slots_others_grab_early_go_first(world):
+    member = await world.enroll()
+    world.book(member, "13:00-17:00")
+    for back in (1, 2, 3):
+        world.store.record_taken(TOMORROW - timedelta(days=back), [("room327", 15 * 60, 16 * 60)], world.clock.now())
+    await world.clock.run(world.engine.night(OPENING))
+    assert world.starts() == ["15:00", "13:00"]
+
+
+async def test_only_the_first_form_is_fetched_ahead_and_the_next_one_after_a_reply(world):
+    member = await world.enroll()
+    world.book(member, "13:00-17:00")
+    await world.clock.run(world.engine.night(OPENING))
+    assert [at for at, _, _ in world.fake.submissions] == [OPENING + FIRST, OPENING + FIRST + GAP]
+    fetched = [at for at, _, _ in world.fake.forms]
+    assert sum(at < OPENING for at in fetched) == 1
+    assert fetched[-1] == OPENING + FIRST
+
+
+async def test_the_night_notes_which_slots_others_took_in_the_first_minutes(world):
+    member = await world.enroll()
+    world.book(member, "13:00-15:00")
+
+    async def scenario():
+        night = asyncio.ensure_future(world.engine.night(OPENING))
+        await world.clock.sleep_until(OPENING + timedelta(seconds=30))
+        world.fake.occupy("room322", TOMORROW, Span.parse("19:00", "21:00"))
+        await night
+
+    await world.clock.run(scenario())
+    assert world.fake.occupancy_reads == [OPENING + timedelta(minutes=2)]
+    later = TOMORROW + timedelta(days=1)
+    assert world.store.hotness("room322", Span.parse("19:00", "21:00"), later) == 1.0
+    assert world.store.hotness("room327", Span.parse("13:00", "15:00"), later) == 0.0  # 自己订到的不算
+    dump = "\n".join(world.store._db.iterdump())
+    assert "13800000000" not in dump and "某同学" not in dump  # 占用情况里的姓名电话一概不存
 
 
 async def test_nothing_happens_for_members_without_plans(world):
@@ -115,13 +175,49 @@ async def test_a_rejected_password_marks_the_member_and_is_not_retried(world):
     assert world.fake.password_checks == checks + 1
 
 
+async def test_a_broken_occupancy_reply_is_not_retried_with_another_member(world):
+    first = await world.enroll("123000001")
+    second = await world.enroll("123000002", name="周予安")
+    world.book(first, "09:00-11:00", room="room321")
+    world.book(second, "09:00-11:00", room="room322")
+    world.fake.occupancy_broken = True
+    await world.clock.run(world.engine.night(OPENING))
+    assert len(world.fake.occupancy_reads) == 1
+    assert world.store._db.execute("SELECT COUNT(*) FROM observed").fetchone()[0] == 0
+
+
+async def test_daytime_catch_up_goes_in_time_order_so_nothing_runs_out_of_time(world):
+    member = await world.enroll()
+    world.clock.set(datetime(2026, 11, 26, 9, 59, 50, tzinfo=CHINA))
+    world.book(member, "10:00-11:00")
+    world.book(member, "19:00-20:00", room="room322")
+    await world.clock.run(world.engine.sweep())
+    assert world.starts() == ["10:00", "19:00"]
+    assert [outcome for _, outcome, _ in world.outcomes(member)] == [Outcome.BOOKED, Outcome.BOOKED]
+
+
+async def test_a_session_lost_at_the_moment_of_submitting_is_renewed_once(world):
+    member = await world.enroll()
+    world.book(member, "09:00-10:00")
+
+    async def scenario():
+        night = asyncio.ensure_future(world.engine.night(OPENING))
+        await world.clock.sleep_until(OPENING + timedelta(seconds=1))  # 第一张表单已经取好，还没提交
+        world.fake.expire_sessions()
+        await night
+
+    await world.clock.run(scenario())
+    assert world.outcomes(member) == [("09:00–10:00", Outcome.BOOKED, "保存成功")]
+    assert len(world.fake.submissions) == 1
+
+
 async def test_late_opening_is_retried_every_second(world):
     member = await world.enroll()
     world.book(member, "09:00-10:00")
-    world.fake.opens_late = timedelta(seconds=3)
+    world.fake.opens_late = timedelta(seconds=6)
     await world.clock.run(world.engine.night(OPENING))
     assert world.outcomes(member) == [("09:00–10:00", Outcome.BOOKED, "保存成功")]
-    assert [at - OPENING for at, _, _ in world.fake.submissions] == [timedelta(seconds=s) for s in (0, 1, 2, 3)]
+    assert [at - OPENING for at, _, _ in world.fake.submissions] == [timedelta(seconds=s) for s in (4.5, 5.5, 6.5)]
 
 
 async def test_a_slot_that_never_opens_gives_up_after_30_seconds(world):
@@ -321,7 +417,7 @@ async def test_a_session_that_expires_after_2055_is_renewed_before_preparing(wor
 
     await world.clock.run(scenario())
     assert world.outcomes(member) == [("09:00–10:00", Outcome.BOOKED, "保存成功")]
-    assert world.fake.submissions[0][0] == OPENING
+    assert world.fake.submissions[0][0] == OPENING + FIRST
 
 
 async def test_removing_a_member_mid_run_stops_their_remaining_segments(world):
@@ -330,7 +426,7 @@ async def test_removing_a_member_mid_run_stops_their_remaining_segments(world):
 
     async def scenario():
         night = asyncio.ensure_future(world.engine.night(OPENING))
-        await world.clock.sleep_until(OPENING + timedelta(milliseconds=500))
+        await world.clock.sleep_until(OPENING + FIRST + timedelta(milliseconds=500))
         world.store.remove_member(member, world.clock.now())
         await night
 

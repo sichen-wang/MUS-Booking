@@ -87,7 +87,7 @@ def test_filled_form_has_our_four_answers_in_place():
     filled = Form("room", date(2026, 11, 25), Span(1380, 1410), tuple(form.pairs())).filled("")
     values = dict(filled)
     assert len(filled) == 46
-    assert values["theme"] == values["bizFieldBookField.theme"] == values["bizFieldBookField.useDesc"] == "练琴"
+    assert values["theme"] == values["bizFieldBookField.theme"] == values["bizFieldBookField.useDesc"] == "1"
     assert values["bizFieldBookField.joinNums"] == "1"
     assert values["userPhone"] == "000000"
     assert [name for name, _ in filled] == [name for name, _ in form.pairs()]

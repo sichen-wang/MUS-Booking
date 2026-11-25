@@ -1,6 +1,7 @@
 """学校场地系统的访问入口。
 
 所有请求都从这里发出，只发往 *.cuhk.edu.cn。会在学校系统里留下记录的只有 `submit` 一个方法。
+占用情况接口会连同预定人的姓名和电话一起返回，这里只取琴房和起止时间。
 登录链路、读取可预定内容和提交的步骤见 PLAN.md 的“学校系统的访问方式”。
 """
 
@@ -11,14 +12,14 @@ import re
 import secrets
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 from urllib.parse import urlencode, urljoin, urlsplit
 
 import httpx
 
-from ..domain import Room, Span, hhmm
+from ..domain import CHINA, Room, Span, hhmm
 from . import pages
 from .errors import LoginRejected, NeedsUser, PortalError, SessionLost, Uncertain, Unexpected, Unreachable
 
@@ -42,7 +43,8 @@ USER_AGENT = (
 )
 TIMEOUT = 20.0
 SUBMIT_TIMEOUT = 30.0
-THEME = "练琴"
+THEME = "1"
+"""预定主题和用途说明。大家随手填的多是“1”，写成“练琴”反而显眼。"""
 DEFAULT_PHONE = "000000"
 FORM_ID = "bizFieldBookMainForm"
 _REDIRECTS = {301, 302, 303, 307, 308}
@@ -159,6 +161,15 @@ class Record:
             and self.start[:16] == f"{day:%Y-%m-%d} {hhmm(span.start)}"
             and self.end[:16] == f"{day:%Y-%m-%d} {hhmm(span.end)}"
         )
+
+
+@dataclass(frozen=True)
+class Taken:
+    """占用情况里的一条：哪间琴房的哪一段已经被订走，以当天的分钟计。"""
+
+    room: str
+    start: int
+    end: int
 
 
 # ---- 访问 ---------------------------------------------------------------------
@@ -411,10 +422,31 @@ class School:
             raise Unreachable(f"连不上学校的服务器（{type(error).__name__}）") from error
         except httpx.HTTPError as error:
             raise Uncertain(f"提交后没有收到答复（{type(error).__name__}）") from error
+        if response.status_code in _REDIRECTS:  # 被登录过滤器挡在门外，请求没有到达预定的接口
+            raise SessionLost("场地系统的登录已失效")
         if response.status_code >= 500:
             # 网关报错时学校可能已经保存了这条预定，不能当作失败
             raise Uncertain(f"提交后学校的服务器出错（HTTP {response.status_code}）")
         return classify(response.status_code, response.text)
+
+    async def occupancy(self, profile: Profile, day: date) -> list[Taken]:
+        """这一天各琴房已被订走的时段。"""
+        response = await self._booking(
+            "GET",
+            "/a/field/book/bizFieldBookField/eventsV1",
+            params={
+                "startTime": f"{day:%Y-%m-%d}",
+                "endTime": f"{day + timedelta(days=1):%Y-%m-%d}",
+                "ftId": profile.type_id,
+                "reBookMainId": "",
+                "jsonStr": "[]",
+                "fitUseStr": "",
+            },
+        )
+        payload = pages.json_or_none(response.text)
+        if not isinstance(payload, dict) or not isinstance(payload.get("event"), list):
+            raise Unexpected("占用情况的格式变了")
+        return [taken for row in payload["event"] if isinstance(row, dict) and (taken := _taken(row, day))]
 
     async def my_bookings(self, count: int = 30) -> list[Record]:
         """“我的预定”的最近几条，按创建时间从新到旧。"""
@@ -514,6 +546,33 @@ class School:
         if response.status_code > 500 or (response.status_code == 500 and "/bookForm" not in path):
             raise Unreachable(f"场地系统出错了（HTTP {response.status_code}）")
         return response
+
+
+def _taken(row: dict[str, Any], day: date) -> Taken | None:
+    """只读一条占用记录里的琴房、起止时间和状态（1 审核中，2 已通过），其余字段不碰。"""
+    start, end = _moment(row.get("startTime")), _moment(row.get("endTime"))
+    room = row.get("fid")
+    if not room or start is None or end is None or start >= end or start.date() != day:
+        return None
+    if str(row.get("status", "2")) not in {"1", "2"}:
+        return None
+    finish = end.hour * 60 + end.minute if end.date() == day else 24 * 60
+    return Taken(str(room), start.hour * 60 + start.minute, finish)
+
+
+def _moment(value: Any) -> datetime | None:
+    """占用情况里的时间可能是毫秒时间戳，也可能是“2026-11-26 13:00:00”这样的文字。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float) or (isinstance(value, str) and value.strip().isdigit()):
+        return datetime.fromtimestamp(int(value) / 1000, CHINA)
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(value.strip().replace(" ", "T"))
+    except ValueError:
+        return None
+    return moment.replace(tzinfo=CHINA) if moment.tzinfo is None else moment.astimezone(CHINA)
 
 
 def practice_rooms(rows: Iterable[dict[str, Any]]) -> dict[str, Any] | None:

@@ -1,8 +1,10 @@
 """每晚的编排，以及随时的补交。
 
 - 20:55 为第二天有预定的成员登录学校系统；登录失败要区分“密码被拒”（等用户处理）和“暂时连不上”（稍后重试）。
-- 20:59:30 重读日历页，并为每一段预先取好表单。
-- 21:00 起每个成员按时间先后逐段提交，段与段之间隔 1 秒；成员之间互不等待。
+- 20:59:30 重读日历页，为排在最前的一段预先取好表单。
+- 21:00 起每个成员像一个手快的人那样逐段提交：第一段在开放后几秒，之后每段先取表单、隔几秒再交；
+  先后和间隔见 `pace`。成员之间互不等待。
+- 21:02 看一眼第二天的占用情况，记下被别人抢先订走的时段，以后排先后时参考。
 - 平时有任何变动（新增、恢复、开机）时做一次补交：已经开放、还没提交、也还没结束的预定立即提交。
 
 提交前先把这一次的各段“认领”为排队中，此后这一次就不再随用户的修改而变。每段发出前标为“已发出”，
@@ -34,6 +36,7 @@ from ..portal import (
 )
 from ..store import Claimed, Member, Store
 from .clock import Clock
+from .pace import FIRST, Pace
 
 log = logging.getLogger("mus_booking.engine")
 
@@ -43,8 +46,8 @@ LOGIN_GRACE = timedelta(minutes=2)
 """学校在开放前后一直连不上时，登录重试到开放之后这么久。"""
 FORM_AGE = 2.2
 """取到表单后至少等这么多秒再提交（学校要求 2 秒，多留一点余量）。"""
-GAP = 1.0
-"""同一个成员两段之间的间隔。"""
+OBSERVE_AFTER = timedelta(minutes=2)
+"""开放后多久看一眼占用情况。这时已被别人订走的，就是抢手的时段。"""
 NOT_OPEN_WINDOW = 30.0
 """收到“尚未开放”后，每秒重试，最多持续这么久。"""
 NETWORK_RETRIES = 3
@@ -92,10 +95,11 @@ class _Workers:
 
 
 class Engine:
-    def __init__(self, store: Store, clock: Clock, connect: Connect) -> None:
+    def __init__(self, store: Store, clock: Clock, connect: Connect, *, pace: Pace | None = None) -> None:
         self.store = store
         self.clock = clock
         self.connect = connect
+        self.pace = pace or Pace()
         self.status = Status()
         self._locks: dict[int, asyncio.Lock] = {}
         self._wake = asyncio.Event()
@@ -170,6 +174,7 @@ class Engine:
                 skews.append(result)
         self.store.finish_run(opening, self.clock.now(), round(sum(skews) / len(skews)) if skews else None)
         self.poke()  # 开抢期间被搁下的补交
+        await self._observe(opening, [m.id for m in members])
 
     def _has_plans(self, member_id: int, day: date) -> bool:
         return any(o.state is State.PLANNED for o in self.store.schedule(member_id).on(day))
@@ -196,23 +201,34 @@ class Engine:
                 skew = await self._refresh(account)
                 prepared = await self._prepare(account, opening)
                 await self.clock.sleep_until(opening)
-                await self._work(account, prepared)
+                await self._work(account, prepared, at_opening=True)
                 return skew
         finally:
             await self._sign_out(account)
 
     async def _prepare(self, account: _Account, opening: datetime) -> Prepared:
-        """为开放时刻要提交的各段同时取好表单。到 21:00 还没取到的，到时候再取。"""
-        day = opening.date() + timedelta(days=1)
-        wanted = [
-            (occurrence, span)
-            for occurrence in self.store.schedule(account.member.id).on(day)
-            if occurrence.state is State.PLANNED
-            for span in occurrence.span.split(account.profile.time_limit)
-        ]
-        prepared: Prepared = {}
+        """为排在最前的一段预先取好表单，其余各段轮到时再取。
 
-        async def fetch(occurrence, span) -> None:
+        第一段最早在开放后 3 秒才交，所以取表单可以等到那时；再没取到，就在提交时重新取。
+        """
+        day = opening.date() + timedelta(days=1)
+        wanted = self.pace.rank(
+            (
+                (occurrence, span)
+                for occurrence in self.store.schedule(account.member.id).on(day)
+                if occurrence.state is State.PLANNED
+                for span in occurrence.span.split(account.profile.time_limit)
+            ),
+            key=lambda item: (item[0].booking.id, day, item[0].room, item[1]),
+            span=lambda item: item[1],
+            hot=lambda item: self.store.hotness(item[0].room, item[1], day),
+        )
+        prepared: Prepared = {}
+        if not wanted:
+            return prepared
+        occurrence, span = wanted[0]
+
+        async def fetch() -> None:
             try:
                 form = await account.school.form(account.profile, occurrence.room, day, span)
             except PortalError as error:
@@ -220,13 +236,37 @@ class Engine:
                 return
             prepared[(occurrence.booking.id, day, occurrence.room, span)] = (form, self.clock.monotonic())
 
-        if wanted:
-            fetching = asyncio.ensure_future(asyncio.gather(*(fetch(o, s) for o, s in wanted)))
-            deadline = asyncio.ensure_future(self.clock.sleep_until(opening))
-            await asyncio.wait([fetching, deadline], return_when=asyncio.FIRST_COMPLETED)
-            deadline.cancel()
-            fetching.cancel()
+        fetching = asyncio.ensure_future(fetch())
+        deadline = asyncio.ensure_future(self.clock.sleep_until(opening + timedelta(seconds=FIRST[0])))
+        await asyncio.wait([fetching, deadline], return_when=asyncio.FIRST_COMPLETED)
+        deadline.cancel()
+        fetching.cancel()
         return prepared
+
+    async def _observe(self, opening: datetime, member_ids: list[int]) -> None:
+        """开放两分钟后看一眼第二天的占用情况，记下被别人订走的时段。只记琴房和起止时间。"""
+        await self.clock.sleep_until(opening + OBSERVE_AFTER)
+        day = opening.date() + timedelta(days=1)
+        for member_id in member_ids:
+            try:
+                async with self._lock(member_id):
+                    account, _ = await self._sign_in(member_id)
+                    if account is None:
+                        continue  # 登录不上就换一个成员
+                    try:
+                        taken = await account.school.occupancy(account.profile, day)
+                    except PortalError as error:
+                        log.warning("读取 %s 的占用情况失败：%s", day, error)
+                        return  # 已经读过一次，今晚不再换人重读
+                    finally:
+                        await self._sign_out(account)
+            finally:
+                self._resume(member_id)
+            ours = self.store.our_spans(day)
+            others = [(t.room, t.start, t.end) for t in taken if (t.room, t.start, t.end) not in ours]
+            self.store.record_taken(day, others, self.clock.now())
+            log.info("%s 的时段开放两分钟后，别人已订走 %d 段", day, len(others))
+            return
 
     # ---- 补交 -----------------------------------------------------------------
 
@@ -275,14 +315,21 @@ class Engine:
         except Exception:
             log.exception("为成员 %s 补交时出错", member_id)
         finally:
-            if member_id in self._missed:
-                self._missed.discard(member_id)
-                self.poke()
+            self._resume(member_id)
+
+    def _resume(self, member_id: int) -> None:
+        """占着这个成员的期间有补交被搁下了，放开之后马上再扫一遍。"""
+        if member_id in self._missed:
+            self._missed.discard(member_id)
+            self.poke()
 
     # ---- 提交 -----------------------------------------------------------------
 
-    async def _work(self, account: _Account, prepared: Prepared | None = None) -> None:
-        """认领所有到期的预定，然后按时间先后逐段提交。"""
+    async def _work(self, account: _Account, prepared: Prepared | None = None, *, at_opening: bool = False) -> None:
+        """认领所有到期的预定，然后逐段提交。每段先取表单，隔几秒再交，像一个人在一张张地填。
+
+        开抢时按 `pace` 排先后；平时补交按时间先后，快要开始的先交，免得排在后面过了时间。
+        """
         member_id = account.member.id
         now = self.clock.now()
         for occurrence in self.store.schedule(member_id).due(now):
@@ -296,22 +343,35 @@ class Engine:
                 room.name if room else occurrence.room,
                 now,
             )
-        first = True
-        for segment in self.store.unsettled(member_id):
+        segments = self.store.unsettled(member_id)
+        for segment in segments:
+            if segment.outcome is Outcome.SENT:
+                if self.store.member(member_id) is None:
+                    return
+                await self._reconcile(account, segment)
+        queued = [segment for segment in segments if segment.outcome is Outcome.QUEUED]
+        if at_opening:
+            queued = self.pace.rank(
+                queued,
+                key=_key,
+                span=lambda segment: segment.span,
+                hot=lambda segment: self.store.hotness(segment.room, segment.span, segment.day),
+            )
+        not_before: datetime | None = None
+        for segment in queued:
             if self.store.member(member_id) is None:
                 return
-            if segment.outcome is Outcome.SENT:
-                await self._reconcile(account, segment)
-                continue
             if self._started(segment):
                 self._fail(segment, "时间已过")
                 continue
-            if not first:
-                await self.clock.sleep(GAP)
-            first = False
-            await self._submit(account, segment, (prepared or {}).pop(_key(segment), None))
+            if not_before is None:  # 第一段：开放后几秒；白天补交时开放早已过去，不必等
+                not_before = open_at(segment.day) + timedelta(seconds=self.pace.first())
+            await self._submit(account, segment, (prepared or {}).pop(_key(segment), None), not_before)
+            not_before = self.clock.now() + timedelta(seconds=self.pace.gap())
 
-    async def _submit(self, account: _Account, segment: Claimed, ready: tuple[Form, float] | None) -> None:
+    async def _submit(
+        self, account: _Account, segment: Claimed, ready: tuple[Form, float] | None, not_before: datetime
+    ) -> None:
         school, profile = account.school, account.profile
         form, fetched = ready if ready else (None, 0.0)
         not_open_since: float | None = None
@@ -336,13 +396,19 @@ class Engine:
                     return self._fail(segment, str(error))
                 fetched = self.clock.monotonic()
             await self.clock.sleep(FORM_AGE - (self.clock.monotonic() - fetched))
-            await self.clock.sleep_until(open_at(segment.day))
+            await self.clock.sleep_until(max(open_at(segment.day), not_before))
             if self._started(segment):
                 return self._fail(segment, "时间已过")
             if not self.store.mark_sent(segment.id, form.booking_id, self.clock.now()):
                 return None  # 这一段已经不在了（成员被移除），不再提交
             try:
                 reply = await school.submit(profile, form, account.phone)
+            except SessionLost as error:  # 请求被挡在登录这一步，没有到达学校，可以放心重来
+                self.store.requeue(segment.id)
+                if resigned or not await self._resign(account):
+                    return self._fail(segment, str(error))
+                resigned, form = True, None
+                continue
             except Uncertain:
                 sent = replace(segment, school_id=form.booking_id, sent_at=self.clock.now())
                 await self.clock.sleep(5.0)  # 给学校一点时间把这条记下来

@@ -133,14 +133,15 @@ def test_a_version_one_database_is_upgraded_in_place(tmp_path):
     member = add(store)
     code = store.create_invite(NOW)
     store._db.executescript(
-        "DROP TABLE admin; CREATE TABLE admin_links (token_hash TEXT PRIMARY KEY, expires_at TEXT NOT NULL);"
+        "DROP TABLE admin; DROP TABLE taken; DROP TABLE observed;"
+        " CREATE TABLE admin_links (token_hash TEXT PRIMARY KEY, expires_at TEXT NOT NULL);"
         " PRAGMA user_version = 1;"
     )
     store.close()
 
     store = Store.open(path, vault)
     tables = {row[0] for row in store._db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert "admin" in tables and "admin_links" not in tables
+    assert {"admin", "observed", "taken"} <= tables and "admin_links" not in tables
     assert store._db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert store.member(member).student_id == "123000001"
     assert store.invite(code).usable
@@ -155,6 +156,30 @@ def test_a_database_from_a_newer_version_is_refused(tmp_path):
     store.close()
     with pytest.raises(RuntimeError, match="请先更新程序"):
         Store.open(path, vault)
+
+
+# ---- 抢手程度 ------------------------------------------------------------------
+
+
+def test_hotness_is_the_share_of_observed_days_a_slot_went_early(store):
+    evening = Span.parse("19:00", "21:00")
+    assert store.hotness("room327", evening, DAY) == 0.0
+    nights = {
+        1: [("room327", 20 * 60, 21 * 60)],
+        2: [],
+        3: [("room327", 19 * 60, 20 * 60), ("room327", 20 * 60, 21 * 60)],  # 同一天两条只算一天
+        4: [("room322", 19 * 60, 21 * 60)],  # 别的琴房
+    }
+    for back, taken in nights.items():
+        store.record_taken(DAY - timedelta(days=back), taken, NOW)
+    assert store.hotness("room327", evening, DAY) == 0.5
+    assert store.hotness("room327", Span.parse("08:00", "10:00"), DAY) == 0.0
+
+    store.record_taken(DAY - timedelta(days=1), [], NOW)  # 同一天再记一次会覆盖
+    assert store.hotness("room327", evening, DAY) == 0.25
+    store.record_taken(DAY + timedelta(days=60), [], NOW)  # 两个月前的观察随之清掉
+    assert store._db.execute("SELECT COUNT(*) FROM observed").fetchone()[0] == 1
+    assert store._db.execute("SELECT COUNT(*) FROM taken").fetchone()[0] == 0
 
 
 # ---- 会话与管理账号 ------------------------------------------------------------

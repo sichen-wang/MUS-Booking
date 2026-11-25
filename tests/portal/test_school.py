@@ -5,8 +5,9 @@ from datetime import date, datetime, timedelta
 import pytest
 
 from mus_booking.domain import CHINA, Span
-from mus_booking.portal import LoginRejected, NeedsUser, Uncertain, Unreachable, Verdict
+from mus_booking.portal import LoginRejected, NeedsUser, Taken, Uncertain, Unreachable, Verdict
 from mus_booking.portal.fake import FakeSchool
+from mus_booking.portal.school import _taken
 
 pytestmark = pytest.mark.anyio
 
@@ -91,6 +92,30 @@ async def test_an_outage_is_unreachable(fake):
     async with fake.school() as school:
         with pytest.raises(Unreachable):
             await school.sign_in("123000001", "right")
+
+
+async def test_occupancy_gives_rooms_and_times_only(fake):
+    fake.occupy("room322", DAY, Span.parse("19:00", "21:00"))
+    fake.occupy("room327", DAY + timedelta(days=1), Span.parse("19:00", "21:00"))
+    async with fake.school() as school:
+        await school.sign_in("123000001", "right")
+        profile = await school.read_profile()
+        assert await school.occupancy(profile, DAY) == [Taken("room322", 19 * 60, 21 * 60)]
+
+
+def test_occupancy_times_may_be_text_or_milliseconds():
+    eight = int(datetime(2026, 11, 26, 8, 0, tzinfo=CHINA).timestamp() * 1000)
+    assert _taken({"fid": "r", "startTime": eight, "endTime": eight + 3_600_000}, DAY) == Taken("r", 480, 540)
+    assert _taken({"fid": "r", "startTime": "2026-11-26 19:00:00", "endTime": "2026-11-26 21:00:00"}, DAY) == Taken(
+        "r", 1140, 1260
+    )
+    assert _taken({"fid": "r", "startTime": "2026-11-26 23:00", "endTime": "2026-11-27 01:00"}, DAY) == Taken(
+        "r", 1380, 1440
+    )
+    assert _taken({"fid": "r", "startTime": "2026-11-25 19:00", "endTime": "2026-11-25 21:00"}, DAY) is None
+    assert _taken({"fid": "r", "startTime": "soon", "endTime": "later"}, DAY) is None
+    cancelled = {"fid": "r", "startTime": "2026-11-26 19:00", "endTime": "2026-11-26 21:00", "status": "4"}
+    assert _taken(cancelled, DAY) is None
 
 
 async def test_profile_lists_the_practice_rooms(fake):

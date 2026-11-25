@@ -89,6 +89,11 @@ class FakeSchool:
     """为真时任何密码都被拒绝（模拟用户改了学校密码）。"""
     password_checks: int = 0
     submissions: list[tuple[datetime, str, str]] = field(default_factory=list)
+    forms: list[tuple[datetime, str, str]] = field(default_factory=list)
+    """取过的每张表单：时刻、学号、开始时间。"""
+    occupancy_reads: list[datetime] = field(default_factory=list)
+    occupancy_broken: bool = False
+    """为真时占用情况接口返回看不懂的内容。"""
     _codes: dict[str, str] = field(default_factory=dict)
     _sessions: dict[str, str] = field(default_factory=dict)
     _gateway: dict[str, tuple[str, bool]] = field(default_factory=dict)
@@ -238,6 +243,8 @@ class FakeSchool:
             return self._save(request, user, form)
         if path == "/a/field/book/bizFieldBookMainMe/listData":
             return self._listing(request, user)
+        if path == "/a/field/book/bizFieldBookField/eventsV1":
+            return self._events(request)
         return httpx.Response(404, request=request)
 
     # ---- 场地系统的页面 -------------------------------------------------------
@@ -276,6 +283,7 @@ class FakeSchool:
             return _html(request, "<html>系统错误</html>", 500)
         form_id, token = secrets.token_hex(16), secrets.token_hex(16)
         self._tokens[token] = _Token(account.student_id, form_id, room, day, span, self.now())
+        self.forms.append((self.now(), account.student_id, start))
         fields = {
             "form_id": form_id,
             "user_id": account.student_id,
@@ -319,6 +327,30 @@ class FakeSchool:
             self.lose_replies -= 1
             raise httpx.ReadTimeout("答复丢失", request=request)
         return _json(request, reply)
+
+    def _events(self, request: httpx.Request) -> httpx.Response:
+        """占用情况。和真的接口一样带上预定人的姓名和电话，用来确认我们不会读取它们。"""
+        self.occupancy_reads.append(self.now())
+        if self.occupancy_broken:
+            return _json(request, {"oops": True})
+        params = dict(request.url.params)
+        first, last = date.fromisoformat(params["startTime"]), date.fromisoformat(params["endTime"])
+        rows = [
+            {
+                "id": secrets.token_hex(16),
+                "fid": b.room,
+                "startTime": int(b.span.starts_on(b.day).timestamp() * 1000),
+                "endTime": int(b.span.ends_on(b.day).timestamp() * 1000),
+                "status": b.status,
+                "userId": b.student_id,
+                "userName": "某同学",
+                "userPhone": "13800000000",
+                "theme": "1",
+            }
+            for b in self.bookings
+            if first <= b.day < last and b.status in {"1", "2"}
+        ]
+        return _json(request, {"event": rows, "lockEvent": [], "fitEvent": []})
 
     def _listing(self, request: httpx.Request, user: str) -> httpx.Response:
         names = {room.id: room.name for room in self.rooms}

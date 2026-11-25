@@ -1,4 +1,5 @@
-"""SQLite 里的全部数据：成员、邀请码、可预定内容、预定、跳过、提交的段、浏览器会话、管理账号和每晚的记录。
+"""SQLite 里的全部数据：成员、邀请码、可预定内容、预定、跳过、提交的段、浏览器会话、管理账号、
+每晚的记录，以及开放后不久被别人订走的时段。
 
 服务只有一个进程，网页和每晚的提交都在同一个事件循环里调用这里的同步方法，
 所以一次调用内的检查和写入不会被打断。命令行工具可能同时写入，由 WAL 和忙等待处理。
@@ -26,6 +27,9 @@ INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 """邀请码用的字符，去掉了 0、O、1、I、L 这类容易看错的。"""
 INVITE_LENGTH = 4
 SESSION_IDLE = timedelta(days=180)
+HOT_WINDOW = timedelta(days=28)
+"""估计抢手程度时看多少天的观察。"""
+KEEP_TAKEN = timedelta(days=56)
 SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 """管理密码的散列参数，约占 16 MB 内存，算一次几十毫秒。"""
 
@@ -115,9 +119,24 @@ CREATE TABLE admin (
 );
 """
 
-SCHEMA_VERSION = 2
+_TAKEN = """
+CREATE TABLE observed (
+    day TEXT PRIMARY KEY,
+    seen_at TEXT NOT NULL
+);
+CREATE TABLE taken (
+    day TEXT NOT NULL REFERENCES observed(day) ON DELETE CASCADE,
+    room TEXT NOT NULL,
+    start_min INTEGER NOT NULL,
+    end_min INTEGER NOT NULL
+);
+CREATE INDEX taken_room ON taken(room, day);
+"""
+
+SCHEMA_VERSION = 3
 _UPGRADES = {
     1: _ADMIN + "DROP TABLE admin_links;",  # 第 2 版：一次性管理链接换成管理账号
+    2: _TAKEN,  # 第 3 版：记录开放后不久被别人订走的时段
 }
 
 
@@ -236,7 +255,9 @@ class Store:
                 raise RuntimeError(f"数据库是第 {version} 版，比这个程序新，请先更新程序")
             if version == SCHEMA_VERSION:
                 return
-            steps = [_SCHEMA + _ADMIN] if version == 0 else [_UPGRADES[v] for v in range(version, SCHEMA_VERSION)]
+            steps = (
+                [_SCHEMA + _ADMIN + _TAKEN] if version == 0 else [_UPGRADES[v] for v in range(version, SCHEMA_VERSION)]
+            )
             for statement in "".join(steps).split(";"):  # 表结构里没有带分号的字符串
                 if statement.strip():
                     self._db.execute(statement)
@@ -592,6 +613,45 @@ class Store:
     def claim_admin(self, member_id: int) -> None:
         """管理账号还没有对应的成员时，记下这一位。"""
         self._db.execute("UPDATE admin SET member_id = ? WHERE id = 1 AND member_id IS NULL", (member_id,))
+
+    # ---- 抢手程度 -------------------------------------------------------------
+
+    def record_taken(self, day: date, taken: Iterable[tuple[str, int, int]], now: datetime) -> None:
+        """记下开放后不久这一天已被别人订走的时段（琴房、开始和结束的分钟）。同一天再记一次会覆盖。"""
+        with self.transaction():
+            self._db.execute(
+                "DELETE FROM observed WHERE day = ? OR day < ?", (day.isoformat(), (day - KEEP_TAKEN).isoformat())
+            )
+            self._db.execute("INSERT INTO observed (day, seen_at) VALUES (?, ?)", (day.isoformat(), _t(now)))
+            self._db.executemany(
+                "INSERT INTO taken (day, room, start_min, end_min) VALUES (?, ?, ?, ?)",
+                [(day.isoformat(), room, start, end) for room, start, end in taken],
+            )
+
+    def hotness(self, room: str, span: Span, day: date) -> float:
+        """这间琴房的这一段有多抢手：day 之前四周观察过的日子里，开放后不久它已被别人订走的比例。"""
+        since, until = (day - HOT_WINDOW).isoformat(), day.isoformat()
+        seen = self._one("SELECT COUNT(*) FROM observed WHERE day >= ? AND day < ?", since, until)[0]
+        if not seen:
+            return 0.0
+        hits = self._one(
+            "SELECT COUNT(DISTINCT day) FROM taken"
+            " WHERE room = ? AND day >= ? AND day < ? AND start_min < ? AND end_min > ?",
+            room,
+            since,
+            until,
+            span.end,
+            span.start,
+        )[0]
+        return hits / seen
+
+    def our_spans(self, day: date) -> set[tuple[str, int, int]]:
+        """所有成员这一天订到的段，以及已经发出、还在核对的段，用来从占用情况里排除自己人。"""
+        rows = self._all(
+            "SELECT room, start_min, end_min FROM segments WHERE day = ? AND outcome IN ('booked', 'sent')",
+            day.isoformat(),
+        )
+        return {(row["room"], row["start_min"], row["end_min"]) for row in rows}
 
     # ---- 每晚的记录 -----------------------------------------------------------
 
