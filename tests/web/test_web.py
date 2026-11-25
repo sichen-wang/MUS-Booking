@@ -385,3 +385,18 @@ def test_requests_forwarded_by_caddy_reach_pages_and_static_files():
     assert world.client.get("/booking/static/fonts/serif-ui.woff2").status_code == 200
     assert world.client.get("/booking/manifest.webmanifest").json()["start_url"] == "/booking/"
     world.store.close()
+
+
+def test_only_the_preview_shows_a_way_in_on_the_bind_page(world):
+    assert "成员首页" not in world.client.get("/").text
+
+    world.app.state.services.preview = {
+        "member": "/preview/as/1",
+        "admin": "/preview/as/1?admin=1",
+        "student_id": "123090519",
+        "password": "preview",
+    }
+    page = world.client.get("/")
+    assert 'href="/preview/as/1"' in page.text and "123090519" in page.text
+    code = re.search(r'name="code" value="(\w+)"', page.text).group(1)
+    assert world.store.invite(code).usable

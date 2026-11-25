@@ -35,7 +35,8 @@ def build() -> tuple[Services, dict[str, str]]:
     store = Store.open(folder / "preview.db", Vault(Fernet.generate_key()))
     links = asyncio.run(_seed(store, fake, clock.now()))
     engine = Engine(store, clock, fake.school)
-    return Services(store, engine, clock, fake.school, preview=True), links
+    hint = {"member": links["member"], "admin": links["admin"], "student_id": student_id, "password": password}
+    return Services(store, engine, clock, fake.school, preview=hint), links
 
 
 async def _seed(store: Store, fake: FakeSchool, now: datetime) -> dict[str, str]:

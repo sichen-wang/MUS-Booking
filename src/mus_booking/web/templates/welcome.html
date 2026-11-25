@@ -2,6 +2,16 @@
 {% from "_icons.html" import icon %}
 {% block body %}
 <main class="page entry-page">
+  {% if preview %}
+  <section class="preview">
+    <div class="preview-row">
+      <span class="tag">预览</span>
+      <a class="preview-link" href="{{ u(preview.member) }}">成员首页</a>
+      <a class="preview-link" href="{{ u(preview.admin) }}">管理页</a>
+    </div>
+    <p class="preview-note">绑定新账号：学号 <span class="mono">{{ preview.student_id }}</span>，密码 <span class="mono">{{ preview.password }}</span></p>
+  </section>
+  {% endif %}
   <div class="brand">
     <img src="{{ static('icon.png') }}" alt="" width="28" height="28">
     <span>MUS Booking</span>

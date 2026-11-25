@@ -78,8 +78,20 @@ def _start_session(request: Request, member_id: int, response: Response, current
 async def home(request: Request, invite: str = "") -> Response:
     current = visitor(request)
     if current is None or current.member is None:
-        return render(request, "welcome.html", code=invite.strip().upper()[:8], values={}, error="")
+        hint = _preview_hint(request)
+        code = invite.strip().upper()[:8] or (hint["invite"] if hint else "")
+        return render(request, "welcome.html", code=code, values={}, error="", preview=hint)
     return _home(request, current)
+
+
+def _preview_hint(request: Request) -> dict[str, str] | None:
+    """预览模式下在绑定页上给出入口：示例成员、管理页，以及一个还能用的邀请码。"""
+    svc = services(request)
+    if not svc.preview:
+        return None
+    store, now = svc.store, now_of(request)
+    usable = [invite.code for invite in store.invites() if invite.usable]
+    return {**svc.preview, "invite": usable[0] if usable else store.create_invite(now)}
 
 
 def _home(request: Request, current: Visitor, sheet: dict | None = None) -> Response:
@@ -461,6 +473,6 @@ async def preview_as(request: Request, member_id: int) -> Response:
         raise HTTPException(404)
     admin = request.query_params.get("admin") == "1"
     token = svc.store.create_session(member_id, now_of(request), admin=admin)
-    response = go(request, "/")
+    response = go(request, "/admin" if admin else "/")
     set_session(request, response, token)
     return response

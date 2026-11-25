@@ -149,6 +149,22 @@ button[disabled] .btn-label { display: none; }
   line-height: 20px;
   color: var(--muted);
 }
+.preview { margin-bottom: 28px; padding: 14px 16px; border-radius: 16px; background: var(--card); }
+.preview-row { display: flex; align-items: center; gap: 8px; }
+.preview-row .tag { margin-right: auto; }
+.preview-link {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--on-ink);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.preview-note { margin-top: 10px; font-size: 13px; line-height: 20px; color: var(--muted); }
 .aside { margin: 16px 0 0; text-align: center; font-size: 14px; line-height: 20px; color: var(--muted); }
 .aside a { color: var(--accent); font-weight: 600; }
 

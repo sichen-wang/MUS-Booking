@@ -31,7 +31,8 @@ class Services:
     engine: Engine
     clock: Clock
     connect: Connect
-    preview: bool = False
+    preview: dict[str, str] | None = None
+    """预览模式下的入口信息（示例成员、测试学号和密码）；正式服务为 None。"""
 
 
 def _versions() -> dict[str, str]:
