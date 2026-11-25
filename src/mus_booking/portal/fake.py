@@ -91,6 +91,10 @@ class FakeSchool:
     submissions: list[tuple[datetime, str, str]] = field(default_factory=list)
     forms: list[tuple[datetime, str, str]] = field(default_factory=list)
     """取过的每张表单：时刻、学号、开始时间。"""
+    fail_forms: int = 0
+    """接下来这么多次取表单时网关报错。"""
+    broken_rooms: set[str] = field(default_factory=set)
+    """这些琴房的预定表单一直取不到。"""
     occupancy_reads: list[datetime] = field(default_factory=list)
     occupancy_broken: bool = False
     """为真时占用情况接口返回看不懂的内容。"""
@@ -272,7 +276,12 @@ class FakeSchool:
         return _CALENDAR.format(resources=resources, now=millis, rule=RULE_ID if with_rule else "", form_url=_FORM_URL)
 
     def _form(self, request: httpx.Request, account: Account) -> httpx.Response:
+        if self.fail_forms:
+            self.fail_forms -= 1
+            return _html(request, "<html>Bad Gateway</html>", 502)
         params = dict(request.url.params)
+        if params.get("fId") in self.broken_rooms:
+            return _html(request, "<html>系统错误</html>", 500)
         try:
             room = params["fId"]
             start = params["bizFieldBookField.startTime"]

@@ -122,14 +122,69 @@ async def test_within_a_part_of_the_day_the_slots_others_grab_early_go_first(wor
     assert world.starts() == ["15:00", "13:00"]
 
 
-async def test_only_the_first_form_is_fetched_ahead_and_the_next_one_after_a_reply(world):
+async def test_every_form_is_fetched_ahead_in_turn_and_sent_at_planned_moments(world):
+    member = await world.enroll()
+    world.book(member, "08:00-10:00", room="room321")
+    world.book(member, "19:00-21:00")
+    await world.clock.run(world.engine.night(OPENING))
+    assert world.starts() == ["19:00", "08:00"]
+    assert [at for at, _, _ in world.fake.submissions] == [OPENING + FIRST, OPENING + FIRST + GAP]
+    fetches = world.fake.forms
+    assert all(at < OPENING for at, _, _ in fetches)
+    assert [start[11:16] for _, _, start in fetches] == ["19:00", "08:00"]  # 按提交的先后取，不是按添加的先后
+
+
+async def test_a_late_segment_pushes_the_next_one_back_instead_of_crowding_it(world):
+    member = await world.enroll()
+    world.clock.set(datetime(2026, 11, 26, 9, 59, 50, tzinfo=CHINA))
+    world.book(member, "10:00-11:00")
+    world.book(member, "19:00-20:00", room="room322")
+    world.fake.fail_forms = 1  # 第一段的表单第一次没取到，晚了 2 秒
+    await world.clock.run(world.engine.sweep())
+    first, second = (at for at, _, _ in world.fake.submissions)
+    assert second - first == GAP
+    assert world.starts() == ["10:00", "19:00"]
+
+
+async def test_a_skipped_segment_hands_on_its_place_so_the_next_still_keeps_the_gap(world):
+    member = await world.enroll()
+    world.clock.set(datetime(2026, 11, 26, 9, 59, 50, tzinfo=CHINA))
+    world.book(member, "10:00-11:00")
+    world.book(member, "13:00-14:00", room="room321")
+    world.book(member, "19:00-20:00", room="room322")
+    world.fake.fail_forms = 2  # 第一段的表单两次没取到，晚了 4 秒
+    world.fake.broken_rooms = {"room321"}  # 中间一段取不到表单，放弃
+    await world.clock.run(world.engine.sweep())
+    assert world.starts() == ["10:00", "19:00"]
+    first, third = (at for at, _, _ in world.fake.submissions)
+    assert third - first == GAP
+
+
+async def test_a_rejected_password_is_tried_only_once_by_segments_in_flight(world):
+    member = await world.enroll()
+    world.book(member, "13:00-19:00")
+    checks = world.fake.password_checks
+
+    async def scenario():
+        night = asyncio.ensure_future(world.engine.night(OPENING))
+        await world.clock.sleep_until(OPENING + timedelta(seconds=1))
+        world.fake.expire_sessions()
+        world.fake.reject_passwords = True  # 用户在学校改了密码
+        await night
+
+    await world.clock.run(scenario())
+    assert world.fake.password_checks == checks + 1
+    assert {outcome for _, outcome, _ in world.outcomes(member)} == {Outcome.FAILED}
+    assert world.store.member(member).login_ok is False
+
+
+async def test_send_moments_do_not_wait_for_earlier_replies(world):
     member = await world.enroll()
     world.book(member, "13:00-17:00")
+    world.fake.opens_late = timedelta(seconds=6)  # 第一段要重试两次才成功
     await world.clock.run(world.engine.night(OPENING))
-    assert [at for at, _, _ in world.fake.submissions] == [OPENING + FIRST, OPENING + FIRST + GAP]
-    fetched = [at for at, _, _ in world.fake.forms]
-    assert sum(at < OPENING for at in fetched) == 1
-    assert fetched[-1] == OPENING + FIRST
+    assert [at - OPENING for at, _, _ in world.fake.submissions] == [timedelta(seconds=s) for s in (4.5, 5.5, 6.5, 8.0)]
+    assert [outcome for _, outcome, _ in world.outcomes(member)] == [Outcome.BOOKED, Outcome.BOOKED]
 
 
 async def test_the_night_notes_which_slots_others_took_in_the_first_minutes(world):
@@ -194,6 +249,8 @@ async def test_daytime_catch_up_goes_in_time_order_so_nothing_runs_out_of_time(w
     await world.clock.run(world.engine.sweep())
     assert world.starts() == ["10:00", "19:00"]
     assert [outcome for _, outcome, _ in world.outcomes(member)] == [Outcome.BOOKED, Outcome.BOOKED]
+    first, second = (at for at, _, _ in world.fake.submissions)
+    assert second - first == GAP
 
 
 async def test_a_session_lost_at_the_moment_of_submitting_is_renewed_once(world):
