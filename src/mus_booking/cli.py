@@ -15,6 +15,9 @@ from .config import Settings
 from .domain import CHINA
 from .store import MissingKey, Store, Vault
 
+CONFIG_ERROR = 78
+"""配置有误时的退出码（sysexits 的 EX_CONFIG）。systemd 单元遇到它不再重启，免得日志里反复报同一个错。"""
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="mus-booking", description="每晚 21:00 替音乐学院的同学预定琴房")
@@ -54,7 +57,7 @@ def _open_store(settings: Settings) -> Store:
         vault = Vault.load(settings.key_file)
     except MissingKey as error:
         print(error, file=sys.stderr)
-        raise SystemExit(1) from error
+        raise SystemExit(CONFIG_ERROR) from error
     return Store.open(settings.database, vault)
 
 

@@ -6,12 +6,12 @@
 
 ## 安装
 
-服务器需要能访问学校的系统。先装好 uv，再用它在仓库里建立虚拟环境；虚拟环境使用系统自带的 Python 3.12，这样以服务账号运行时不依赖 root 的家目录。新版合并到 `main` 之前在 `dev` 分支上，克隆时要指定这个分支。
+服务器需要能访问学校的系统。先装好 uv，再用它在仓库里建立虚拟环境；虚拟环境使用系统自带的 Python 3.12，这样以服务账号运行时不依赖 root 的家目录。
 
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh
 useradd --system --home /opt/mus-booking --shell /usr/sbin/nologin mus-booking
-git clone --branch dev https://github.com/sichen-wang/MUS-Booking.git /opt/mus-booking
+git clone https://github.com/sichen-wang/MUS-Booking.git /opt/mus-booking
 cd /opt/mus-booking
 UV_PYTHON_PREFERENCE=only-system ~/.local/bin/uv sync --frozen --no-dev
 .venv/bin/mus-booking check
@@ -41,7 +41,7 @@ systemctl enable --now mus-booking
 journalctl -u mus-booking -f
 ```
 
-日志里出现 `Application startup complete` 即表示服务已经起来。没有密钥文件时服务会拒绝启动，并在日志里说明原因。
+日志里出现 `Uvicorn running on http://127.0.0.1:8000` 即表示服务已经起来；它前面的 `Application startup complete` 出现时端口还没有绑定，不能作为依据。没有密钥文件时服务会拒绝启动，在日志里说明原因，并且不再自动重启。
 
 ## 接入 Caddy
 

@@ -14,8 +14,9 @@ def env(tmp_path, monkeypatch):
 
 
 def test_commands_refuse_to_run_without_a_key(env, capsys):
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as stopped:
         cli.main(["invite"])
+    assert stopped.value.code == cli.CONFIG_ERROR
     assert "mus-booking init" in capsys.readouterr().err
 
 
