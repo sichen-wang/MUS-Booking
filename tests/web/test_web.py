@@ -58,8 +58,10 @@ class World:
         assert response.status_code == 200, response.text
         return client
 
-    def new_client(self) -> TestClient:
-        return TestClient(self.app, base_url="http://testserver", headers={"Origin": "http://testserver"})
+    def new_client(self, address: str = "testclient") -> TestClient:
+        return TestClient(
+            self.app, base_url="http://testserver", headers={"Origin": "http://testserver"}, client=(address, 50000)
+        )
 
 
 @pytest.fixture
@@ -252,22 +254,80 @@ def test_the_admin_page_is_hidden_without_the_admin_flag(world):
     assert world.client.post("/admin/invites").status_code == 404
 
 
-def test_an_admin_link_works_once_and_only_after_the_button(world):
-    token = world.store.create_admin_link(NOW)
+def sign_in_as_admin(client: TestClient, password: str = "open sesame", name: str = "Keeper"):
+    return client.post("/login", data={"student_id": name, "password": password}, follow_redirects=False)
+
+
+def test_the_admin_signs_in_on_the_login_page_with_a_name(world):
+    world.store.set_admin("Keeper", "open sesame", NOW)
     admin = world.new_client()
-    preview = admin.get(f"/admin/enter/{token}")  # 聊天软件的链接预览只会 GET
-    assert "进入管理页" in preview.text
+    assert "账号或密码不对" in sign_in_as_admin(admin, password="nope").text
+    assert "账号或密码不对" in sign_in_as_admin(admin, name="someone").text
     assert admin.get("/admin").status_code == 404
-    assert admin.post(f"/admin/enter/{token}").status_code == 200
+    assert sign_in_as_admin(admin, name="keeper").headers["location"] == "/admin"
     page = admin.get("/admin")
-    assert page.status_code == 200 and "邀请码" in page.text and "退出" in page.text
-    assert world.new_client().post(f"/admin/enter/{token}").status_code == 404
+    assert page.status_code == 200 and "邀请码" in page.text
+    assert "绑定账号" in page.text and "退出登录" in page.text  # 还没有对应成员
+
+
+def test_admin_and_member_sign_ins_share_the_budget_of_one_address(world):
+    world.store.set_admin("Keeper", "open sesame", NOW)
+    admin = world.new_client()
+    for _ in range(4):
+        sign_in_as_admin(admin, password="nope")
+        admin.post("/login", data={"student_id": "123000001", "password": "nope"})
+    assert "尝试次数过多" in sign_in_as_admin(admin).text
+    assert admin.get("/admin").status_code == 404
+
+
+def test_guessing_the_admin_password_from_many_addresses_is_limited_too(world):
+    world.store.set_admin("Keeper", "open sesame", NOW)
+    for n in range(8):
+        sign_in_as_admin(world.new_client(address=f"10.0.0.{n}"), password="nope")
+    owner = world.new_client(address="10.0.1.1")
+    assert "尝试次数过多" in sign_in_as_admin(owner).text
+    # 名字对不上的尝试只算在来源地址上，不会挤占管理账号的次数
+    assert "账号或密码不对" in sign_in_as_admin(world.new_client(address="10.0.2.1"), name="someone").text
+
+
+def test_binding_while_signed_in_as_admin_ties_the_two_together(world):
+    world.store.set_admin("Keeper", "open sesame", NOW)
+    phone = world.new_client()
+    sign_in_as_admin(phone)
+    assert "回到管理" in phone.get("/").text
+    world.bind(client=phone)
+    assert world.store.admin_account().member_id == 1
+    assert "回到我的预定" in phone.get("/admin").text
+    assert 'href="/admin"' in phone.get("/account").text
+
+    laptop = world.new_client()  # 换一台设备，用管理账号登录一次就同时回到成员首页和管理页
+    assert sign_in_as_admin(laptop).headers["location"] == "/"
+    assert laptop.get("/admin").status_code == 200
+    assert world.store.session(laptop.cookies["mb_session"], NOW).member_id == 1
+
+
+def test_signing_in_as_admin_on_someone_elses_phone_does_not_tie_them_together(world):
+    world.store.set_admin("Keeper", "open sesame", NOW)
+    friend = world.bind()
+    assert sign_in_as_admin(friend).headers["location"] == "/admin"
+    assert world.store.admin_account().member_id is None
+
+
+def test_admins_cannot_remove_themselves(world):
+    world.store.set_admin("Keeper", "open sesame", NOW)
+    phone = world.new_client()
+    sign_in_as_admin(phone)
+    world.bind(client=phone)
+    assert "/admin/members/1/remove" not in phone.get("/admin").text
+    phone.post("/admin/members/1/remove")
+    assert [member.id for member in world.store.members()] == [1]
 
 
 def test_admins_generate_invites_and_remove_members(world):
     world.bind()
+    world.store.set_admin("Keeper", "open sesame", NOW)
     admin = world.new_client()
-    admin.post(f"/admin/enter/{world.store.create_admin_link(NOW)}")
+    sign_in_as_admin(admin)
     admin.post("/admin/invites")
     codes = [invite.code for invite in world.store.invites() if invite.usable]
     assert len(codes) == 1

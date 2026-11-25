@@ -1,10 +1,12 @@
-"""命令行：启动服务、预览、生成邀请码和管理链接、检查能否连到学校系统。"""
+"""命令行：启动服务、预览、生成邀请码、设置管理账号、检查能否连到学校系统。"""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import logging
+import re
 import sys
 import time
 
@@ -31,7 +33,8 @@ def main(argv: list[str] | None = None) -> int:
 
     commands.add_parser("init", help="生成密钥文件和数据目录")
     commands.add_parser("invite", help="生成一个邀请码")
-    commands.add_parser("admin-link", help="生成一次性的管理链接，15 分钟内有效")
+    admin = commands.add_parser("admin", help="设置管理账号：在登录页用这个名字和密码登录，就能进入管理页")
+    admin.add_argument("name", help="管理账号的名字，不能是纯数字（纯数字会被当作学号）")
 
     preview = commands.add_parser("preview", help="用假学校系统和示例数据启动，查看全部页面")
     preview.add_argument("--port", type=int, default=8000)
@@ -46,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         "serve": _serve,
         "init": _init,
         "invite": _invite,
-        "admin-link": _admin_link,
+        "admin": _admin,
         "preview": _preview,
         "check": _check,
     }[args.command](args)
@@ -111,10 +114,20 @@ def _invite(_: argparse.Namespace) -> int:
     return 0
 
 
-def _admin_link(_: argparse.Namespace) -> int:
-    settings = Settings.from_env()
-    token = _open_store(settings).create_admin_link(_now())
-    print(f"{settings.public_url}/admin/enter/{token}")
+def _admin(args: argparse.Namespace) -> int:
+    name = args.name.strip()
+    if not name or re.sub(r"\s+", "", name).isdigit() or len(name) > 32:
+        print("管理账号的名字不能为空、不能是纯数字，最长 32 个字符", file=sys.stderr)
+        return 1
+    password = getpass.getpass("密码：")
+    if len(password) < 8:
+        print("密码至少 8 位", file=sys.stderr)
+        return 1
+    if getpass.getpass("再输一次：") != password:
+        print("两次输入的密码不一致", file=sys.stderr)
+        return 1
+    _open_store(Settings.from_env()).set_admin(name, password, _now())
+    print(f"管理账号已设置。在登录页的学号一栏填 {name}，再填这个密码，就能进入管理页。")
     return 0
 
 

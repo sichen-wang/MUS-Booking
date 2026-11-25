@@ -22,6 +22,7 @@ PEOPLE = (
     ("123090136", "沈听澜"),
 )
 NEWCOMER = ("123090519", "宋清和", "preview")
+ADMIN = ("admin", "preview")
 
 
 def build() -> tuple[Services, dict[str, str]]:
@@ -35,7 +36,14 @@ def build() -> tuple[Services, dict[str, str]]:
     store = Store.open(folder / "preview.db", Vault(Fernet.generate_key()))
     links = asyncio.run(_seed(store, fake, clock.now()))
     engine = Engine(store, clock, fake.school)
-    hint = {"member": links["member"], "admin": links["admin"], "student_id": student_id, "password": password}
+    hint = {
+        "member": links["member"],
+        "admin": links["admin"],
+        "student_id": student_id,
+        "password": password,
+        "admin_name": ADMIN[0],
+        "admin_password": ADMIN[1],
+    }
     return Services(store, engine, clock, fake.school, preview=hint), links
 
 
@@ -103,6 +111,7 @@ async def _seed(store: Store, fake: FakeSchool, now: datetime) -> dict[str, str]
         code = store.create_invite(now - timedelta(days=5))
         store.bind_invite(code, code_owner, now - timedelta(days=5))
     open_code = store.create_invite(now)
+    store.set_admin(*ADMIN, now)  # 先不对应成员，预览里可以走一遍“管理账号登录后绑定”的流程
     fake.occupy("room327", today + timedelta(days=1), Span.parse("08:00", "09:00"))
 
     return {

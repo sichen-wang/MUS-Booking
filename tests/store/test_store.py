@@ -5,8 +5,8 @@ from cryptography.fernet import Fernet
 
 from mus_booking.domain import CHINA, Booking, Outcome, Room, Span, State
 from mus_booking.portal import Profile
-from mus_booking.store import MissingKey, Store, Vault
-from mus_booking.store.db import INVITE_ALPHABET
+from mus_booking.store import AdminAccount, MissingKey, Session, Store, Vault, password_matches
+from mus_booking.store.db import INVITE_ALPHABET, SCHEMA_VERSION
 
 NOW = datetime(2026, 11, 25, 20, 0, tzinfo=CHINA)
 DAY = date(2026, 11, 26)
@@ -123,7 +123,41 @@ def test_removing_a_member_deletes_their_data_and_voids_their_invite(store):
     assert store.invite(code).voided_at is not None
 
 
-# ---- 会话与管理链接 ------------------------------------------------------------
+# ---- 版本升级 ------------------------------------------------------------------
+
+
+def test_a_version_one_database_is_upgraded_in_place(tmp_path):
+    vault = Vault(Fernet.generate_key())
+    path = tmp_path / "mus-booking.db"
+    store = Store.open(path, vault)
+    member = add(store)
+    code = store.create_invite(NOW)
+    store._db.executescript(
+        "DROP TABLE admin; CREATE TABLE admin_links (token_hash TEXT PRIMARY KEY, expires_at TEXT NOT NULL);"
+        " PRAGMA user_version = 1;"
+    )
+    store.close()
+
+    store = Store.open(path, vault)
+    tables = {row[0] for row in store._db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "admin" in tables and "admin_links" not in tables
+    assert store._db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert store.member(member).student_id == "123000001"
+    assert store.invite(code).usable
+    store.close()
+
+
+def test_a_database_from_a_newer_version_is_refused(tmp_path):
+    vault = Vault(Fernet.generate_key())
+    path = tmp_path / "mus-booking.db"
+    store = Store.open(path, vault)
+    store._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+    store.close()
+    with pytest.raises(RuntimeError, match="请先更新程序"):
+        Store.open(path, vault)
+
+
+# ---- 会话与管理账号 ------------------------------------------------------------
 
 
 def test_sessions_store_only_a_hash_and_expire_when_idle(store):
@@ -137,12 +171,40 @@ def test_sessions_store_only_a_hash_and_expire_when_idle(store):
     assert store.session("forged", NOW) is None
 
 
-def test_admin_links_work_once_within_fifteen_minutes(store):
-    token = store.create_admin_link(NOW)
-    assert store.redeem_admin_link(token, NOW + timedelta(minutes=10)) is True
-    assert store.redeem_admin_link(token, NOW + timedelta(minutes=11)) is False
-    late = store.create_admin_link(NOW)
-    assert store.redeem_admin_link(late, NOW + timedelta(minutes=16)) is False
+def test_the_admin_password_is_stored_only_as_a_hash(store):
+    assert store.admin_account() is None
+    assert store.admin_secret("Keeper") is None
+    store.set_admin("Keeper", "open sesame", NOW)
+    account, secret = store.admin_secret(" keeper ")
+    assert account == AdminAccount("Keeper", None)
+    assert "open sesame" not in secret and secret.startswith("scrypt$")
+    assert password_matches("open sesame", secret)
+    assert not password_matches("open sesam", secret)
+    assert store.admin_secret("someone") is None
+
+
+def test_resetting_the_admin_password_takes_admin_rights_back_from_every_browser(store):
+    store.set_admin("Keeper", "open sesame", NOW)
+    member = add(store)
+    lost_phone = store.create_session(None, NOW, admin=True)
+    own_phone = store.create_session(member, NOW, admin=True)
+    store.set_admin("Keeper", "new secret", NOW)
+    assert store.session(lost_phone, NOW).admin is False
+    assert store.session(own_phone, NOW) == Session(member, False)
+
+
+def test_the_admin_account_is_claimed_once_and_released_by_reset_or_removal(store):
+    store.set_admin("Keeper", "open sesame", NOW)
+    first, second = add(store), add(store, "123000002")
+    store.claim_admin(first)
+    store.claim_admin(second)
+    assert store.admin_account().member_id == first
+    store.set_admin("Keeper", "new secret", NOW)
+    assert store.admin_account().member_id is None
+    store.claim_admin(second)
+    assert store.admin_account().member_id == second
+    store.remove_member(second, NOW)
+    assert store.admin_account() == AdminAccount("Keeper", None)
 
 
 # ---- 预定与段 ------------------------------------------------------------------

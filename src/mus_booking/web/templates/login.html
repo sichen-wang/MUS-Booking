@@ -11,7 +11,7 @@
   <form class="fields" method="post" hx-push-url="false" action="{{ u('/login') }}" hx-disabled-elt="find button">
     <label class="field">
       <span class="field-label">学号</span>
-      <input name="student_id" value="{{ values.get('student_id', '') }}" inputmode="numeric" autocomplete="username" required>
+      <input name="student_id" value="{{ values.get('student_id', '') }}" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required>
     </label>
     <label class="field">
       <span class="field-label">密码</span>

@@ -59,11 +59,14 @@ docker exec new-api-caddy caddy reload --config /etc/caddy/Caddyfile
 
 ```sh
 cd /opt/mus-booking
-sudo -u mus-booking sh -c 'set -a; . /etc/mus-booking/env; .venv/bin/mus-booking admin-link'
-sudo -u mus-booking sh -c 'set -a; . /etc/mus-booking/env; .venv/bin/mus-booking invite'
+sudo -u mus-booking sh -c 'set -a; . /etc/mus-booking/env; .venv/bin/mus-booking admin 名字'
 ```
 
-管理链接只能打开一次，15 分钟内有效，打开它的浏览器从此拥有管理权限。邀请码也可以在管理页上生成，并直接复制带邀请码的链接发给同学。
+这条命令设置管理账号，会要求输入两次密码，至少 8 位；数据库里只存密码的散列。之后在登录页的学号一栏填这个名字（不分大小写），再填密码，就进入管理页。学号都是数字，所以名字不能是纯数字。
+
+用管理账号登录之后，在同一个浏览器里绑定或登录自己的学校账号，两者就对应起来：以后在任何设备上用管理账号登录一次，就同时回到自己的首页和管理页。忘记密码时重新运行这条命令，对应关系随之解除，下次按同样的方式再对应。
+
+邀请码在管理页上生成，可以直接复制带邀请码的链接发给同学；在服务器上也可以用 `mus-booking invite` 生成。
 
 ## 更新与备份
 

@@ -1,4 +1,4 @@
-"""SQLite 里的全部数据：成员、邀请码、可预定内容、预定、跳过、提交的段、浏览器会话和每晚的记录。
+"""SQLite 里的全部数据：成员、邀请码、可预定内容、预定、跳过、提交的段、浏览器会话、管理账号和每晚的记录。
 
 服务只有一个进程，网页和每晚的提交都在同一个事件循环里调用这里的同步方法，
 所以一次调用内的检查和写入不会被打断。命令行工具可能同时写入，由 WAL 和忙等待处理。
@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import secrets
 import sqlite3
@@ -25,7 +26,8 @@ INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 """邀请码用的字符，去掉了 0、O、1、I、L 这类容易看错的。"""
 INVITE_LENGTH = 4
 SESSION_IDLE = timedelta(days=180)
-ADMIN_LINK_TTL = timedelta(minutes=15)
+SCRYPT = {"n": 2**14, "r": 8, "p": 1}
+"""管理密码的散列参数，约占 16 MB 内存，算一次几十毫秒。"""
 
 _SCHEMA = """
 CREATE TABLE members (
@@ -94,10 +96,6 @@ CREATE TABLE sessions (
     created_at TEXT NOT NULL,
     seen_at TEXT NOT NULL
 );
-CREATE TABLE admin_links (
-    token_hash TEXT PRIMARY KEY,
-    expires_at TEXT NOT NULL
-);
 CREATE TABLE runs (
     id INTEGER PRIMARY KEY,
     opening TEXT NOT NULL UNIQUE,
@@ -106,6 +104,21 @@ CREATE TABLE runs (
     skew_ms INTEGER
 );
 """
+
+_ADMIN = """
+CREATE TABLE admin (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    name TEXT NOT NULL,
+    secret TEXT NOT NULL,
+    member_id INTEGER REFERENCES members(id) ON DELETE SET NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+SCHEMA_VERSION = 2
+_UPGRADES = {
+    1: _ADMIN + "DROP TABLE admin_links;",  # 第 2 版：一次性管理链接换成管理账号
+}
 
 
 # ---- 读出的记录 ---------------------------------------------------------------
@@ -147,6 +160,14 @@ class Invite:
 class Session:
     member_id: int | None
     admin: bool
+
+
+@dataclass(frozen=True)
+class AdminAccount:
+    """唯一的管理账号。对应了成员时，用它登录就同时进入这位成员的首页。"""
+
+    name: str
+    member_id: int | None
 
 
 @dataclass(frozen=True)
@@ -208,10 +229,18 @@ class Store:
         self._db.close()
 
     def _migrate(self) -> None:
-        version = self._db.execute("PRAGMA user_version").fetchone()[0]
-        if version == 0:
-            # executescript 会先提交已有的事务，所以把事务写在脚本里
-            self._db.executescript(f"BEGIN IMMEDIATE;\n{_SCHEMA}\nPRAGMA user_version = 1;\nCOMMIT;")
+        # 先拿写锁再读版本号：服务和命令行同时打开旧数据库时，只有一个会去升级
+        with self.transaction():
+            version = self._db.execute("PRAGMA user_version").fetchone()[0]
+            if version > SCHEMA_VERSION:
+                raise RuntimeError(f"数据库是第 {version} 版，比这个程序新，请先更新程序")
+            if version == SCHEMA_VERSION:
+                return
+            steps = [_SCHEMA + _ADMIN] if version == 0 else [_UPGRADES[v] for v in range(version, SCHEMA_VERSION)]
+            for statement in "".join(steps).split(";"):  # 表结构里没有带分号的字符串
+                if statement.strip():
+                    self._db.execute(statement)
+            self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -502,7 +531,7 @@ class Store:
             result.setdefault(entry.member_id, (entry.booked, entry.failed))
         return result
 
-    # ---- 浏览器会话与管理链接 -------------------------------------------------
+    # ---- 浏览器会话 -----------------------------------------------------------
 
     def create_session(self, member_id: int | None, now: datetime, *, admin: bool = False) -> str:
         token = secrets.token_urlsafe(32)
@@ -529,22 +558,40 @@ class Store:
     def drop_session(self, token: str) -> None:
         self._db.execute("DELETE FROM sessions WHERE token_hash = ?", (_hash(token),))
 
-    def create_admin_link(self, now: datetime) -> str:
-        token = secrets.token_urlsafe(24)
-        self._db.execute(
-            "INSERT INTO admin_links (token_hash, expires_at) VALUES (?, ?)",
-            (_hash(token), _t(now + ADMIN_LINK_TTL)),
-        )
-        return token
+    # ---- 管理账号 -------------------------------------------------------------
 
-    def redeem_admin_link(self, token: str, now: datetime) -> bool:
-        """管理链接只能用一次，并且 15 分钟内有效。"""
+    def set_admin(self, name: str, password: str, now: datetime) -> None:
+        """设置管理账号的名字和密码。
+
+        重新设置时，所有浏览器上的管理权限一并收回（例如手机丢了），与成员的对应也解除，之后再自动对应一次。
+        """
+        secret = _hash_password(password)
         with self.transaction():
-            row = self._one("SELECT expires_at FROM admin_links WHERE token_hash = ?", _hash(token))
-            if row is None:
-                return False
-            self._db.execute("DELETE FROM admin_links WHERE token_hash = ?", (_hash(token),))
-            return now <= datetime.fromisoformat(row["expires_at"])
+            self._db.execute(
+                "INSERT INTO admin (id, name, secret, member_id, updated_at) VALUES (1, ?, ?, NULL, ?)"
+                " ON CONFLICT (id) DO UPDATE SET name = excluded.name, secret = excluded.secret,"
+                " member_id = NULL, updated_at = excluded.updated_at",
+                (name, secret, _t(now)),
+            )
+            self._db.execute("UPDATE sessions SET admin = 0 WHERE admin = 1")
+
+    def admin_account(self) -> AdminAccount | None:
+        row = self._one("SELECT name, member_id FROM admin WHERE id = 1")
+        return AdminAccount(row["name"], row["member_id"]) if row else None
+
+    def admin_secret(self, name: str) -> tuple[AdminAccount, str] | None:
+        """名字（不分大小写）对得上时，返回管理账号和密码散列，由调用方用 `password_matches` 核对。
+
+        核对要算几十毫秒的 scrypt，网页里放到别的线程去算，免得耽误同一个事件循环里的提交。
+        """
+        row = self._one("SELECT name, secret, member_id FROM admin WHERE id = 1")
+        if row is None or row["name"].casefold() != name.strip().casefold():
+            return None
+        return AdminAccount(row["name"], row["member_id"]), row["secret"]
+
+    def claim_admin(self, member_id: int) -> None:
+        """管理账号还没有对应的成员时，记下这一位。"""
+        self._db.execute("UPDATE admin SET member_id = ? WHERE id = 1 AND member_id IS NULL", (member_id,))
 
     # ---- 每晚的记录 -----------------------------------------------------------
 
@@ -598,6 +645,18 @@ def _maybe(text: str | None) -> datetime | None:
 
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, dklen=32, **SCRYPT)
+    return f"scrypt${SCRYPT['n']}${SCRYPT['r']}${SCRYPT['p']}${salt.hex()}${digest.hex()}"
+
+
+def password_matches(password: str, stored: str) -> bool:
+    _, n, r, p, salt, digest = stored.split("$")
+    candidate = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=int(n), r=int(r), p=int(p), dklen=32)
+    return hmac.compare_digest(candidate, bytes.fromhex(digest))
 
 
 def _member(row: sqlite3.Row) -> Member:

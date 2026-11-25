@@ -3,6 +3,7 @@ import re
 import pytest
 
 from mus_booking import cli
+from mus_booking.store import Store, Vault, password_matches
 
 
 @pytest.fixture
@@ -20,7 +21,7 @@ def test_commands_refuse_to_run_without_a_key(env, capsys):
     assert "mus-booking init" in capsys.readouterr().err
 
 
-def test_init_then_invite_and_admin_link(env, capsys):
+def test_init_then_invite_and_admin(env, capsys, monkeypatch):
     assert cli.main(["init"]) == 0
     assert (env / "keys" / "secret.key").is_file()
     assert (env / "data" / "mus-booking.db").is_file()
@@ -32,5 +33,17 @@ def test_init_then_invite_and_admin_link(env, capsys):
     assert re.fullmatch(r"[A-Z2-9]{4}", code)
     assert link == f"https://example.test/booking/?invite={code}"
 
-    cli.main(["admin-link"])
-    assert re.fullmatch(r"https://example\.test/booking/admin/enter/[\w-]+\n", capsys.readouterr().out)
+    answers = iter(["open sesame", "open sesame", "short", "open sesame", "different"])
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt="": next(answers))
+    assert cli.main(["admin", "Keeper"]) == 0
+    assert "学号一栏填 Keeper" in capsys.readouterr().out
+    store = Store.open(env / "data" / "mus-booking.db", Vault.load(env / "keys" / "secret.key"))
+    account, secret = store.admin_secret("keeper")
+    assert account.name == "Keeper" and password_matches("open sesame", secret)
+    store.close()
+    assert cli.main(["admin", "12345678"]) == 1
+    assert "纯数字" in capsys.readouterr().err
+    assert cli.main(["admin", "Keeper"]) == 1
+    assert "至少 8 位" in capsys.readouterr().err
+    assert cli.main(["admin", "Keeper"]) == 1
+    assert "不一致" in capsys.readouterr().err

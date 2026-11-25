@@ -8,10 +8,10 @@
     <span class="brand-name">MUS Booking</span>
     <span class="tag">管理</span>
     <span class="spacer"></span>
-    {% if has_member %}
+    {% if me %}
     <a class="admin-back" href="{{ u('/') }}">回到我的预定</a>
     {% else %}
-    <form method="post" hx-push-url="false" action="{{ u('/logout') }}"><button class="small" type="submit">退出</button></form>
+    <a class="admin-back" href="{{ u('/') }}">绑定账号</a>
     {% endif %}
   </header>
 
@@ -41,7 +41,9 @@
               {%- if r.failed %}<span class="tone-fail">{{ r.failed }} 个时段预定失败</span>{% endif %}
             {%- else %}<span class="muted">—</span>{% endif %}</td>
             <td class="actions-cell">
+              {% if r.member.id != me %}
               <form method="post" hx-push-url="false" action="{{ u('/admin/members/%d/remove' % r.member.id) }}"><button class="small" data-confirm="确认移除">移除</button></form>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -90,5 +92,10 @@
       {% endfor %}
     </section>
   </div>
+  {% if not me %}
+  <form class="admin-signout" method="post" hx-push-url="false" action="{{ u('/logout') }}">
+    <button class="quiet danger" type="submit">退出登录</button>
+  </form>
+  {% endif %}
 </main>
 {% endblock %}

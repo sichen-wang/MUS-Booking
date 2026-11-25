@@ -14,7 +14,6 @@ from ..store import Invite, LogEntry, Member
 from . import views
 from .app import go, render, services
 from .pages import Visitor, now_of, visitor
-from .security import set_session
 
 router = APIRouter(prefix="/admin")
 
@@ -24,26 +23,6 @@ def _admin(request: Request) -> Visitor:
     if current is None or not current.session.admin:
         raise HTTPException(404)
     return current
-
-
-@router.get("/enter/{token}")
-async def enter_page(request: Request, token: str) -> Response:
-    """管理链接先显示一个按钮，点了才生效。聊天软件生成链接预览时只会 GET，不会把它用掉。"""
-    return render(request, "admin_enter.html", token=token)
-
-
-@router.post("/enter/{token}")
-async def enter(request: Request, token: str) -> Response:
-    store, now = services(request).store, now_of(request)
-    if not store.redeem_admin_link(token, now):
-        raise HTTPException(404)
-    current = visitor(request)
-    member_id = current.member.id if current and current.member else None
-    if current is not None:
-        store.drop_session(current.token)
-    response = go(request, "/admin")
-    set_session(request, response, store.create_session(member_id, now, admin=True))
-    return response
 
 
 @dataclass(frozen=True)
@@ -68,7 +47,7 @@ def _invite_note(invite: Invite) -> str:
 
 @router.get("")
 async def page(request: Request) -> Response:
-    _admin(request)
+    current = _admin(request)
     svc, now = services(request), now_of(request)
     store = svc.store
     opening = next_opening(now)
@@ -107,7 +86,7 @@ async def page(request: Request) -> Response:
         invites=[(invite, _invite_note(invite)) for invite in store.invites()],
         invite_url=f"{str(request.base_url).rstrip('/')}/?invite=",
         log=log,
-        has_member=visitor(request).member is not None,
+        me=current.member.id if current.member else None,
     )
 
 
@@ -127,6 +106,7 @@ async def void_invite(request: Request, code: str) -> Response:
 
 @router.post("/members/{member_id}/remove")
 async def remove_member(request: Request, member_id: int) -> Response:
-    _admin(request)
-    services(request).store.remove_member(member_id, now_of(request))
+    current = _admin(request)
+    if current.member is None or current.member.id != member_id:  # 不在这里移除自己，免得连同会话和预定一起删掉
+        services(request).store.remove_member(member_id, now_of(request))
     return go(request, "/admin")

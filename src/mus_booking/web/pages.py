@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -10,7 +12,7 @@ from fastapi.responses import JSONResponse, Response
 
 from ..domain import HORIZON, State, hhmm, open_at, ranked
 from ..portal import Profile
-from ..store import Member, Session
+from ..store import Member, Session, password_matches
 from . import actions, views
 from .actions import Refused
 from .app import go, render, services
@@ -61,12 +63,20 @@ def _client(request: Request) -> str:
     return request.client.host if request.client else "?"
 
 
-def _start_session(request: Request, member_id: int, response: Response, current: Visitor | None) -> Response:
-    """登录或绑定之后换发一个新的会话，旧的作废，以免事先拿到旧令牌的人跟着登录。"""
+def _start_session(
+    request: Request, member_id: int | None, response: Response, current: Visitor | None, *, admin: bool = False
+) -> Response:
+    """登录或绑定之后换发一个新的会话，旧的作废，以免事先拿到旧令牌的人跟着登录。
+
+    管理权限跟着会话走：已经以管理账号登录的浏览器再登录或绑定成员，仍是管理员，
+    而管理账号还没有对应成员时，就对应到这一位，以后用管理账号登录直接进入他的首页。
+    """
     store, now = services(request).store, now_of(request)
-    admin = current.session.admin if current else False
+    admin = admin or (current is not None and current.session.admin)
     if current is not None:
         store.drop_session(current.token)
+    if admin and member_id is not None:
+        store.claim_admin(member_id)
     set_session(request, response, store.create_session(member_id, now, admin=admin))
     return response
 
@@ -80,8 +90,13 @@ async def home(request: Request, invite: str = "") -> Response:
     if current is None or current.member is None:
         hint = _preview_hint(request)
         code = invite.strip().upper()[:8] or (hint["invite"] if hint else "")
-        return render(request, "welcome.html", code=code, values={}, error="", preview=hint)
+        return _welcome(request, current, code=code, preview=hint)
     return _home(request, current)
+
+
+def _welcome(request: Request, current: Visitor | None, *, code: str, values=None, error="", preview=None) -> Response:
+    admin = current is not None and current.session.admin
+    return render(request, "welcome.html", code=code, values=values or {}, error=error, preview=preview, admin=admin)
 
 
 def _preview_hint(request: Request) -> dict[str, str] | None:
@@ -133,7 +148,7 @@ async def bind(request: Request) -> Response:
         )
     except Refused as refused:
         values.pop("password", None)
-        return render(request, "welcome.html", code=values.get("code", ""), values=values, error=str(refused))
+        return _welcome(request, visitor(request), code=values.get("code", ""), values=values, error=str(refused))
     svc.engine.poke()
     return _start_session(request, member, go(request, "/"), visitor(request))
 
@@ -146,6 +161,9 @@ async def login_page(request: Request) -> Response:
 @router.post("/login")
 async def login(request: Request) -> Response:
     values = await _form(request)
+    name = values.get("student_id", "").strip()
+    if name and not re.sub(r"\s+", "", name).isdigit():  # 学号都是数字，其余的当作管理账号
+        return await _admin_login(request, name, values.get("password", ""))
     svc, now = services(request), now_of(request)
     try:
         student_id = actions.clean_student_id(values.get("student_id", ""))
@@ -156,6 +174,22 @@ async def login(request: Request) -> Response:
         return render(request, "login.html", values={"student_id": values.get("student_id", "")}, error=str(refused))
     svc.engine.poke()
     return _start_session(request, member, go(request, "/"), visitor(request))
+
+
+async def _admin_login(request: Request, name: str, password: str) -> Response:
+    """管理账号登录。只进入管理账号自己对应的成员；还没有对应时只进管理页，不顺带对应当前浏览器里的成员。"""
+    store = services(request).store
+    found = store.admin_secret(name)
+    keys = (f"ip:{_client(request)}", "admin") if found else (f"ip:{_client(request)}",)
+    if not request.app.state.login_limit.allow(*keys):
+        error = "尝试次数过多，请稍后再试"
+    elif found is None or not await asyncio.to_thread(password_matches, password, found[1]):
+        error = "账号或密码不对"
+    else:
+        member_id = found[0].member_id
+        response = go(request, "/" if member_id else "/admin")
+        return _start_session(request, member_id, response, visitor(request), admin=True)
+    return render(request, "login.html", values={"student_id": name}, error=error)
 
 
 @router.post("/logout")

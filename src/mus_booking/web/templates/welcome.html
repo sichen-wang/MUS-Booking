@@ -10,6 +10,7 @@
       <a class="preview-link" href="{{ u(preview.admin) }}">管理页</a>
     </div>
     <p class="preview-note">绑定新账号：学号 <span class="mono">{{ preview.student_id }}</span>，密码 <span class="mono">{{ preview.password }}</span></p>
+    <p class="preview-note tight">管理账号：<span class="mono">{{ preview.admin_name }}</span>，密码 <span class="mono">{{ preview.admin_password }}</span></p>
   </section>
   {% endif %}
   <div class="brand">
@@ -39,7 +40,7 @@
     {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
     <div class="push"></div>
     <button class="primary" type="submit"><span class="btn-label">开始使用</span><span class="spinner" aria-hidden="true"></span></button>
-    <p class="aside">已经绑定过？<a href="{{ u('/login') }}">直接登录</a></p>
+    <p class="aside">已经绑定过？<a href="{{ u('/login') }}">直接登录</a>{% if admin %} · <a href="{{ u('/admin') }}">回到管理</a>{% endif %}</p>
   </form>
 </main>
 {% endblock %}
