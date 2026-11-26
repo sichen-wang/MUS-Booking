@@ -85,6 +85,27 @@ class Profile:
 
 
 @dataclass(frozen=True)
+class Answers:
+    """预定表单里要人填、带星号的几项。会议才用的那些行在琴房的表单里是隐藏的，原样留空；邮箱沿用学校预填的。"""
+
+    phone: str = ""
+    theme: str = DEFAULT_THEME
+    people: int = 1
+    purpose: str = ""
+    """用途说明。空着就和主题相同。"""
+
+    def values(self) -> dict[str, str]:
+        theme = self.theme or DEFAULT_THEME
+        return {
+            "theme": theme,
+            "bizFieldBookField.theme": theme,
+            "bizFieldBookField.useDesc": self.purpose or theme,
+            "bizFieldBookField.joinNums": str(self.people),
+            "userPhone": self.phone or DEFAULT_PHONE,
+        }
+
+
+@dataclass(frozen=True)
 class Form:
     """取到的一张预定表单。表单里有服务器生成的预定编号和一次性令牌。"""
 
@@ -97,15 +118,8 @@ class Form:
     def booking_id(self) -> str:
         return dict(self.pairs).get("id", "")
 
-    def filled(self, phone: str, theme: str = DEFAULT_THEME) -> list[tuple[str, str]]:
-        theme = theme or DEFAULT_THEME
-        values = {
-            "theme": theme,
-            "bizFieldBookField.theme": theme,
-            "bizFieldBookField.useDesc": theme,
-            "bizFieldBookField.joinNums": "1",
-            "userPhone": phone or DEFAULT_PHONE,
-        }
+    def filled(self, answers: Answers = Answers()) -> list[tuple[str, str]]:
+        values = answers.values()
         result = [(name, values.pop(name, value)) for name, value in self.pairs]
         return result + list(values.items())
 
@@ -406,13 +420,13 @@ class School:
             raise Unexpected(f"没有取到预定表单（HTTP {page.status_code}）")
         return Form(room, day, span, tuple(found.pairs()))
 
-    async def submit(self, profile: Profile, form: Form, phone: str, theme: str = DEFAULT_THEME) -> Reply:
+    async def submit(self, profile: Profile, form: Form, answers: Answers = Answers()) -> Reply:
         """提交一张表单。这是唯一会在学校系统里产生预定的请求。"""
         url = f"{BOOKING}/a/field/book/bizFieldBookMain/saveData?reBookMainId=&ruleId={profile.rule_id}"
         try:
             response = await self._client.post(
                 url,
-                content=urlencode(form.filled(phone, theme)).encode(),
+                content=urlencode(form.filled(answers)).encode(),
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                     "X-Requested-With": "XMLHttpRequest",

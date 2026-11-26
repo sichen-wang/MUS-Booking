@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 import pytest
 
 from mus_booking.domain import CHINA, Span
-from mus_booking.portal import LoginRejected, NeedsUser, Taken, Uncertain, Unreachable, Verdict
+from mus_booking.portal import Answers, LoginRejected, NeedsUser, Taken, Uncertain, Unreachable, Verdict
 from mus_booking.portal.fake import FakeSchool
 from mus_booking.portal.school import _taken
 
@@ -138,18 +138,18 @@ async def test_the_submission_rules(fake, clock):
         room = profile.rooms[0].id
 
         form = await school.form(profile, room, DAY, span)
-        assert (await school.submit(profile, form, "")).verdict is Verdict.TOO_FAST
+        assert (await school.submit(profile, form)).verdict is Verdict.TOO_FAST
         clock.advance(2)
-        assert (await school.submit(profile, form, "")).verdict is Verdict.NOT_OPEN
+        assert (await school.submit(profile, form)).verdict is Verdict.NOT_OPEN
         clock.now = datetime(2026, 11, 25, 21, 0, tzinfo=CHINA)
-        reply = await school.submit(profile, form, "")
+        reply = await school.submit(profile, form)
         assert (reply.verdict, reply.message) == (Verdict.BOOKED, "保存成功")
-        assert (await school.submit(profile, form, "")).verdict is Verdict.STALE
+        assert (await school.submit(profile, form)).verdict is Verdict.STALE
 
         fake.occupy(profile.rooms[1].id, DAY, Span.parse("20:00", "22:00"))
         other = await school.form(profile, profile.rooms[1].id, DAY, span)
         clock.advance(2)
-        assert (await school.submit(profile, other, "")).verdict is Verdict.TAKEN
+        assert (await school.submit(profile, other)).verdict is Verdict.TAKEN
 
         records = await school.my_bookings()
     assert len(records) == 1
@@ -166,6 +166,6 @@ async def test_a_lost_reply_is_uncertain_but_the_booking_exists(fake, clock):
         clock.advance(3)
         fake.lose_replies = 1
         with pytest.raises(Uncertain):
-            await school.submit(profile, form, "13800000000")
+            await school.submit(profile, form, Answers(phone="13800000000"))
         records = await school.my_bookings()
     assert [r.matches(profile.rooms[0].name, DAY, Span.parse("09:00", "10:00")) for r in records] == [True]

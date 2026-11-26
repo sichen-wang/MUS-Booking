@@ -260,13 +260,14 @@ def test_settings_change_the_theme_and_phone(world):
     home = world.client.get("/").text
     assert 'href="/settings"' in home
     page = world.client.get("/settings").text
-    assert 'value="练琴"' in page and 'name="phone"' in page
-    saved = world.client.post("/settings", data={"theme": "  1 ", "phone": "138 0000 0000"})
-    assert "已保存" in saved.text
+    assert 'value="练琴"' in page and all(f'name="{n}"' in page for n in ("purpose", "people", "phone"))
+    form = {"theme": "  1 ", "purpose": "合奏 排练", "people": "3", "phone": "138 0000 0000"}
+    assert "已保存" in world.client.post("/settings", data=form).text
     member = world.store.member(1)
-    assert (member.theme, member.phone) == ("1", "13800000000")
-    world.client.post("/settings", data={"theme": "", "phone": ""})
-    assert world.store.member(1).theme == "练琴"  # 留空就回到默认
+    assert (member.theme, member.purpose, member.people, member.phone) == ("1", "合奏 排练", 3, "13800000000")
+    world.client.post("/settings", data={"theme": "", "purpose": "", "people": "", "phone": ""})
+    member = world.store.member(1)
+    assert (member.theme, member.purpose, member.people) == ("练琴", "", 1)  # 留空就回到默认
 
 
 def test_settings_reject_a_bad_phone_and_keep_what_was_typed(world):
@@ -276,6 +277,9 @@ def test_settings_reject_a_bad_phone_and_keep_what_was_typed(world):
         response = world.client.post("/settings", data={"theme": "1", "phone": phone})
         assert "电话只能填数字" in response.text
         assert 'value="1"' in response.text and f'value="{phone}"' in response.text
+    for people in ("0", "100", "两", "1.5"):
+        response = world.client.post("/settings", data={"theme": "1", "people": people})
+        assert "人数只能填 1 到 99" in response.text
     member = world.store.member(1)
     assert (member.theme, member.phone) == ("练琴", "13800000000")
 

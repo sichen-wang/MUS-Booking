@@ -453,7 +453,12 @@ async def settings(request: Request) -> Response:
 
 def _settings(request: Request, current: Visitor, *, values=None, error: str = "", saved: str = "") -> Response:
     member = current.member
-    shown = values or {"theme": member.theme, "phone": member.phone}
+    shown = values or {
+        "theme": member.theme,
+        "purpose": member.purpose,
+        "people": str(member.people),
+        "phone": member.phone,
+    }
     return render(request, "settings.html", values=shown, default_theme=DEFAULT_THEME, error=error, saved=saved)
 
 
@@ -462,14 +467,10 @@ async def save_settings(request: Request) -> Response:
     current = member_of(request)
     values = await _form(request)
     try:
-        theme = actions.clean_theme(values.get("theme", ""))
-        phone = actions.clean_phone(values.get("phone", ""))
+        answers = actions.clean_answers(values)
     except Refused as refused:
         return _settings(request, current, values=values, error=str(refused))
-    store = services(request).store
-    with store.transaction():
-        store.set_theme(current.member.id, theme)
-        store.set_phone(current.member.id, phone)
+    services(request).store.save_answers(current.member.id, answers)
     return _settings(request, visitor(request) or current, saved="已保存")
 
 

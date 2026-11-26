@@ -23,8 +23,6 @@ from datetime import date, datetime, timedelta
 
 from ..domain import Outcome, State, next_opening, open_at
 from ..portal import (
-    DEFAULT_PHONE,
-    DEFAULT_THEME,
     Form,
     LoginRejected,
     NeedsUser,
@@ -424,12 +422,12 @@ class Engine:
             await self.clock.sleep_until(max(open_at(segment.day), not_before))
             if self._started(segment):
                 return self._fail(segment, "时间已过")
-            member = self.store.member(account.member.id)  # 现读，晚上刚在设置里改的电话和主题也算数
+            member = self.store.member(account.member.id)  # 现读，晚上刚在设置里改的也算数
             if member is None or not self.store.mark_sent(segment.id, form.booking_id, self.clock.now()):
                 return None  # 这一段已经不在了（成员被移除），不再提交
             account.posts += 1
             try:
-                reply = await school.submit(profile, form, member.phone or DEFAULT_PHONE, member.theme or DEFAULT_THEME)
+                reply = await school.submit(profile, form, member.answers)
             except SessionLost as error:  # 请求被挡在登录这一步，没有到达学校，可以放心重来
                 self.store.requeue(segment.id)
                 if resigned or not await self._resign(account):

@@ -9,7 +9,7 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 
 from ..domain import HORIZON, Booking, Frozen, Span, State, parse_hhmm, rehomed_skips, retire, revise
-from ..portal import DEFAULT_THEME, LoginRejected, NeedsUser, PortalError, Profile, School, Unreachable
+from ..portal import DEFAULT_THEME, Answers, LoginRejected, NeedsUser, PortalError, Profile, School, Unreachable
 from ..store import Store
 
 log = logging.getLogger("mus_booking.web")
@@ -18,6 +18,8 @@ Connect = Callable[[Iterable[dict[str, str]]], School]
 
 
 THEME_LIMIT = 20
+PURPOSE_LIMIT = 50
+PEOPLE_LIMIT = 99
 
 
 class Refused(Exception):
@@ -42,6 +44,33 @@ def clean_theme(text: str) -> str:
     if len(value) > THEME_LIMIT:
         raise Refused(f"主题最多 {THEME_LIMIT} 个字")
     return value or DEFAULT_THEME
+
+
+def clean_purpose(text: str) -> str:
+    """用途说明：留空就和主题相同。"""
+    value = " ".join((text or "").split())
+    if len(value) > PURPOSE_LIMIT:
+        raise Refused(f"用途最多 {PURPOSE_LIMIT} 个字")
+    return value
+
+
+def clean_people(text: str) -> int:
+    value = (text or "").strip()
+    if not value:
+        return 1
+    if not re.fullmatch(r"[0-9]{1,2}", value) or not 1 <= int(value) <= PEOPLE_LIMIT:
+        raise Refused(f"人数只能填 1 到 {PEOPLE_LIMIT}")
+    return int(value)
+
+
+def clean_answers(values: dict[str, str]) -> Answers:
+    """设置页提交的几项，逐项校验。"""
+    return Answers(
+        phone=clean_phone(values.get("phone", "")),
+        theme=clean_theme(values.get("theme", "")),
+        people=clean_people(values.get("people", "")),
+        purpose=clean_purpose(values.get("purpose", "")),
+    )
 
 
 def clean_phone(text: str) -> str:

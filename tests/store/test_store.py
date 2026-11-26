@@ -134,6 +134,7 @@ def test_a_version_one_database_is_upgraded_in_place(tmp_path):
     code = store.create_invite(NOW)
     store._db.executescript(
         "DROP TABLE admin; DROP TABLE taken; DROP TABLE observed; ALTER TABLE members DROP COLUMN theme;"
+        " ALTER TABLE members DROP COLUMN people; ALTER TABLE members DROP COLUMN purpose;"
         " CREATE TABLE admin_links (token_hash TEXT PRIMARY KEY, expires_at TEXT NOT NULL);"
         " PRAGMA user_version = 1;"
     )
@@ -145,7 +146,8 @@ def test_a_version_one_database_is_upgraded_in_place(tmp_path):
     assert store._db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert store.member(member).student_id == "123000001"
     assert store.invite(code).usable
-    assert store.member(member).theme == "练琴"  # 原有成员用默认的主题
+    old = store.member(member)
+    assert (old.theme, old.people, old.purpose) == ("练琴", 1, "")  # 原有成员用默认值
     store.close()
 
 

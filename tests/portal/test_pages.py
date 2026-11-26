@@ -9,7 +9,7 @@ import pytest
 from mus_booking.domain import CHINA, Span
 from mus_booking.portal import Form, Record, Verdict, classify, pages
 from mus_booking.portal.errors import Unexpected
-from mus_booking.portal.school import practice_rooms
+from mus_booking.portal.school import Answers, practice_rooms
 
 SAMPLES = Path(__file__).parent / "samples"
 
@@ -85,11 +85,14 @@ def test_booking_form_is_serialized_like_the_browser_does():
 def test_filled_form_has_our_four_answers_in_place():
     form = pages.form_by_id(sample("book_form.html"), "bizFieldBookMainForm")
     blank = Form("room", date(2026, 11, 25), Span(1380, 1410), tuple(form.pairs()))
-    filled = blank.filled("")
+    filled = blank.filled()
     values = dict(filled)
     assert len(filled) == 46
     assert values["theme"] == values["bizFieldBookField.theme"] == values["bizFieldBookField.useDesc"] == "练琴"
-    assert dict(blank.filled("", "1"))["bizFieldBookField.useDesc"] == "1"
+    custom = dict(blank.filled(Answers(phone="13800000000", theme="1", people=2, purpose="合奏排练")))
+    assert (custom["theme"], custom["bizFieldBookField.useDesc"]) == ("1", "合奏排练")
+    assert (custom["bizFieldBookField.joinNums"], custom["userPhone"]) == ("2", "13800000000")
+    assert dict(blank.filled(Answers(theme="1")))["bizFieldBookField.useDesc"] == "1"  # 用途空着就同主题
     assert values["bizFieldBookField.joinNums"] == "1"
     assert values["userPhone"] == "000000"
     assert [name for name, _ in filled] == [name for name, _ in form.pairs()]

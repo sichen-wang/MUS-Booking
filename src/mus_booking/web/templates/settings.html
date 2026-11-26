@@ -13,6 +13,14 @@
         <input class="row-input" name="theme" value="{{ values.get('theme', '') }}" maxlength="20" autocomplete="off" placeholder="{{ default_theme }}">
       </label>
       <label class="row">
+        <span class="row-label">用途</span>
+        <input class="row-input" name="purpose" value="{{ values.get('purpose', '') }}" maxlength="50" autocomplete="off" placeholder="同主题">
+      </label>
+      <label class="row">
+        <span class="row-label">人数</span>
+        <input class="row-input" name="people" value="{{ values.get('people', '') }}" inputmode="numeric" maxlength="2" autocomplete="off" placeholder="1">
+      </label>
+      <label class="row">
         <span class="row-label">电话</span>
         <input class="row-input" name="phone" type="tel" value="{{ values.get('phone', '') }}" inputmode="numeric" autocomplete="tel" placeholder="选填">
       </label>

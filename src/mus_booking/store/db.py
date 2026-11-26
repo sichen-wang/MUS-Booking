@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ..domain import CHINA, Booking, Outcome, Schedule, Segment, Span
-from ..portal import DEFAULT_THEME, Profile
+from ..portal import DEFAULT_THEME, Answers, Profile
 from .vault import Vault
 
 INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -40,6 +40,8 @@ CREATE TABLE members (
     name TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
     theme TEXT NOT NULL DEFAULT '练琴',
+    people INTEGER NOT NULL DEFAULT 1,
+    purpose TEXT NOT NULL DEFAULT '',
     secret BLOB NOT NULL,
     credential_version INTEGER NOT NULL DEFAULT 1,
     login_ok INTEGER NOT NULL DEFAULT 1,
@@ -134,11 +136,13 @@ CREATE TABLE taken (
 CREATE INDEX taken_room ON taken(room, day);
 """
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _UPGRADES = {
     1: _ADMIN + "DROP TABLE admin_links;",  # 第 2 版：一次性管理链接换成管理账号
     2: _TAKEN,  # 第 3 版：记录开放后不久被别人订走的时段
     3: f"ALTER TABLE members ADD COLUMN theme TEXT NOT NULL DEFAULT '{DEFAULT_THEME}';",  # 第 4 版：成员自己的主题
+    4: "ALTER TABLE members ADD COLUMN people INTEGER NOT NULL DEFAULT 1;"  # 第 5 版：参与人数和用途说明
+    " ALTER TABLE members ADD COLUMN purpose TEXT NOT NULL DEFAULT '';",
 }
 
 
@@ -155,7 +159,13 @@ class Member:
     login_note: str
     created_at: datetime
     theme: str = DEFAULT_THEME
-    """填进预定表单的主题和用途说明。"""
+    people: int = 1
+    purpose: str = ""
+
+    @property
+    def answers(self) -> Answers:
+        """填进预定表单的几项。"""
+        return Answers(self.phone, self.theme, self.people, self.purpose)
 
 
 @dataclass(frozen=True)
@@ -351,11 +361,12 @@ class Store:
         )
         return cursor.rowcount == 1
 
-    def set_phone(self, member_id: int, phone: str) -> None:
-        self._db.execute("UPDATE members SET phone = ? WHERE id = ?", (phone, member_id))
-
-    def set_theme(self, member_id: int, theme: str) -> None:
-        self._db.execute("UPDATE members SET theme = ? WHERE id = ?", (theme, member_id))
+    def save_answers(self, member_id: int, answers: Answers) -> None:
+        """保存成员在设置里填的电话、主题、参与人数和用途说明。"""
+        self._db.execute(
+            "UPDATE members SET phone = ?, theme = ?, people = ?, purpose = ? WHERE id = ?",
+            (answers.phone, answers.theme, answers.people, answers.purpose, member_id),
+        )
 
     def remove_member(self, member_id: int, now: datetime) -> None:
         with self.transaction():
@@ -736,6 +747,8 @@ def _member(row: sqlite3.Row) -> Member:
         row["login_note"],
         datetime.fromisoformat(row["created_at"]),
         row["theme"],
+        row["people"],
+        row["purpose"],
     )
 
 

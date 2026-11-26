@@ -12,6 +12,7 @@ from cryptography.fernet import Fernet
 
 from mus_booking.domain import CHINA, Booking, Outcome, Span, State
 from mus_booking.engine import Engine, Pace, VirtualClock
+from mus_booking.portal import Answers
 from mus_booking.portal.fake import Booked, FakeSchool
 from mus_booking.store import Store, Vault
 
@@ -188,7 +189,7 @@ async def test_a_booking_still_being_processed_is_waited_out_and_retried(world):
 async def test_each_member_books_with_their_own_theme(world):
     plain = await world.enroll("123000001")
     custom = await world.enroll("123000002", name="周予安")
-    world.store.set_theme(custom, "1")
+    world.store.save_answers(custom, Answers(theme="1"))
     world.book(plain, "09:00-10:00", room="room321")
     world.book(custom, "09:00-10:00", room="room322")
     await world.clock.run(world.engine.night(OPENING))
@@ -203,7 +204,7 @@ async def test_a_theme_changed_just_before_21_is_used_that_night(world):
     async def scenario():
         night = asyncio.ensure_future(world.engine.night(OPENING))
         await world.clock.sleep_until(OPENING - timedelta(minutes=1))
-        world.store.set_theme(member, "1")
+        world.store.save_answers(member, Answers(theme="1"))
         await night
 
     await world.clock.run(scenario())
