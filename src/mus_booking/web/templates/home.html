@@ -53,6 +53,7 @@
     {% endfor %}
   </section>
 
+  <a class="fab-aside" href="{{ u('/settings') }}" aria-label="设置">{{ icon('tune', 22) }}</a>
   <a class="fab" href="{{ u('/add') }}" aria-label="添加预定">{{ icon('plus', 24) }}</a>
 </main>
 {% if sheet %}{% include "_sheet.html" %}{% endif %}

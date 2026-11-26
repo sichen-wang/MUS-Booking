@@ -9,12 +9,15 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 
 from ..domain import HORIZON, Booking, Frozen, Span, State, parse_hhmm, rehomed_skips, retire, revise
-from ..portal import LoginRejected, NeedsUser, PortalError, Profile, School, Unreachable
+from ..portal import DEFAULT_THEME, LoginRejected, NeedsUser, PortalError, Profile, School, Unreachable
 from ..store import Store
 
 log = logging.getLogger("mus_booking.web")
 
 Connect = Callable[[Iterable[dict[str, str]]], School]
+
+
+THEME_LIMIT = 20
 
 
 class Refused(Exception):
@@ -33,9 +36,17 @@ def clean_student_id(text: str) -> str:
     return value
 
 
+def clean_theme(text: str) -> str:
+    """预定主题：去掉多余的空白；留空就是默认的“练琴”。"""
+    value = " ".join((text or "").split())
+    if len(value) > THEME_LIMIT:
+        raise Refused(f"主题最多 {THEME_LIMIT} 个字")
+    return value or DEFAULT_THEME
+
+
 def clean_phone(text: str) -> str:
     value = re.sub(r"[\s-]+", "", text or "")
-    if value and not re.fullmatch(r"\+?\d{5,20}", value):
+    if value and not re.fullmatch(r"[0-9]{5,20}", value):  # 学校的表单只收半角数字
         raise Refused("电话只能填数字")
     return value
 
@@ -63,11 +74,9 @@ async def verify(connect: Connect, student_id: str, password: str) -> School:
     return school
 
 
-async def bind(
-    store: Store, connect: Connect, now: datetime, code: str, student_id: str, password: str, phone: str
-) -> int:
-    """用邀请码绑定学校账号，返回新成员的编号。"""
-    student_id, phone = clean_student_id(student_id), clean_phone(phone)
+async def bind(store: Store, connect: Connect, now: datetime, code: str, student_id: str, password: str) -> int:
+    """用邀请码绑定学校账号，返回新成员的编号。电话和主题以后在设置里填。"""
+    student_id = clean_student_id(student_id)
     invite = store.invite(code)
     if invite is None or not invite.usable:
         raise Refused("邀请码无效")
@@ -86,7 +95,7 @@ async def bind(
             (other := store.profile(m.id)) is not None and other.user_id == profile.user_id for m in store.members()
         ):
             raise Refused("这个学号已经绑定过，请直接登录")
-        member = store.add_member(student_id, profile.name, phone, password, cookies, now)
+        member = store.add_member(student_id, profile.name, "", password, cookies, now)
         if not store.bind_invite(code, member, now):
             raise Refused("邀请码无效")
         store.save_profile(member, profile, now)

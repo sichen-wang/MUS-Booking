@@ -90,7 +90,11 @@ class FakeSchool:
     password_checks: int = 0
     submissions: list[tuple[datetime, str, str]] = field(default_factory=list)
     forms: list[tuple[datetime, str, str]] = field(default_factory=list)
+    themes: list[str] = field(default_factory=list)
+    """每次提交的预定主题。"""
     """取过的每张表单：时刻、学号、开始时间。"""
+    busy_replies: int = 0
+    """接下来这么多次提交答复“您有预订正在处理中”，表单不作废。"""
     fail_forms: int = 0
     """接下来这么多次取表单时网关报错。"""
     broken_rooms: set[str] = field(default_factory=set)
@@ -309,6 +313,10 @@ class FakeSchool:
     def _save(self, request: httpx.Request, user: str, form: dict[str, str]) -> httpx.Response:
         now = self.now()
         self.submissions.append((now, user, form.get("bizFieldBookField.startTime", "")))
+        self.themes.append(form.get("theme", ""))
+        if self.busy_replies:
+            self.busy_replies -= 1
+            return _json(request, {"success": False, "message": "您有预订正在处理中，请勿重复提交!"})
         token = self._tokens.get(form.get("bookToken", ""))
         if token is None or token.student_id != user:
             reply = {"success": False, "message": "预订页面已失效，请刷新后重新提交!"}

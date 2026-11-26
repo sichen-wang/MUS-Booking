@@ -2,8 +2,9 @@
 
 - 20:55 为第二天有预定的成员登录学校系统；登录失败要区分“密码被拒”（等用户处理）和“暂时连不上”（稍后重试）。
 - 20:59:30 重读日历页，按先后一张接一张地为各段取好表单。
-- 21:00 起每个成员像一个手快的人那样逐段提交：第一段在开放后几秒，之后每段相隔几秒。各段的提交时刻
-  事先排好，到点就交，不等前一段的答复；先后和间隔见 `pace`。成员之间互不等待。
+- 21:00 起每个成员像一个手快的人那样逐段提交：第一段在开放后几秒，之后每段在上一段收到答复后再隔一两秒。
+  学校不允许同一个账号同时有两笔预定在处理中，所以同一个成员必须等答复；先后和间隔见 `pace`。
+  成员之间互不等待。
 - 21:02 看一眼第二天的占用情况，记下被别人抢先订走的时段，以后排先后时参考。
 - 平时有任何变动（新增、恢复、开机）时做一次补交：已经开放、还没提交、也还没结束的预定立即提交。
 
@@ -23,6 +24,7 @@ from datetime import date, datetime, timedelta
 from ..domain import Outcome, State, next_opening, open_at
 from ..portal import (
     DEFAULT_PHONE,
+    DEFAULT_THEME,
     Form,
     LoginRejected,
     NeedsUser,
@@ -52,6 +54,9 @@ NOT_OPEN_WINDOW = 30.0
 """收到“尚未开放”后，每秒重试，最多持续这么久。"""
 NETWORK_RETRIES = 3
 TOO_FAST_RETRIES = 3
+BUSY_RETRIES = 5
+BUSY_WAIT = 2.0
+"""收到“您有预订正在处理中”后隔多久再试。正常情况下逐段提交不会遇到，答复超时之后才可能。"""
 SETTLE_AFTER = timedelta(minutes=10)
 """提交后没收到答复、“我的预定”里也查不到，过了这么久才算失败。"""
 SWEEP_EVERY = 600.0
@@ -64,58 +69,14 @@ Prepared = dict[tuple, tuple[Form, float]]
 
 @dataclass
 class _Account:
-    """一个已经登录的成员及其学校会话。同一个成员的几段会同时在路上，重新登录要排队。"""
+    """一个已经登录的成员及其学校会话。"""
 
     member: Member
     school: School
     profile: Profile
     version: int
-    renewing: asyncio.Lock = field(default_factory=asyncio.Lock)
-    renewals: int = 0
-    renewed: bool = False
-    """最近一次重新登录是否成功。等锁期间别的段已经成功重新登录，就直接沿用。"""
-
-    @property
-    def phone(self) -> str:
-        return self.member.phone or DEFAULT_PHONE
-
-
-@dataclass
-class _Turn:
-    """一段在这个成员的提交顺序里的位置。
-
-    `planned` 是事先排好的时刻，只是下限：前一段真正交出去之后再隔 `gap` 才轮到这一段。
-    前一段因为取表单慢或网络出错晚了，这一段跟着顺延，间隔和先后都不会乱；不等前一段的答复。
-    """
-
-    planned: datetime
-    previous: asyncio.Future[datetime | None] | None
-    gap: timedelta
-    sent: asyncio.Future[datetime | None] = field(default_factory=lambda: asyncio.get_running_loop().create_future())
-
-    async def wait(self, clock: Clock) -> None:
-        moment = self.planned
-        if self.previous is not None:
-            before = await self.previous
-            if before is not None:
-                moment = max(moment, before + self.gap)
-        await clock.sleep_until(moment)
-
-    def release(self, at: datetime) -> None:
-        """这一段交出去了，下一段从这一刻开始计时。"""
-        if not self.sent.done():
-            self.sent.set_result(at)
-
-    def skip(self) -> None:
-        """这一段不交了：把前一段的发出时刻转给下一段，免得下一段越过还没交的前一段。"""
-        if self.sent.done():
-            return
-        if self.previous is None:
-            self.sent.set_result(None)
-        elif self.previous.done():
-            self.sent.set_result(self.previous.result())
-        else:
-            self.previous.add_done_callback(lambda before: self.sent.done() or self.sent.set_result(before.result()))
+    posts: int = 0
+    """这次会话里真正发出的提交次数。"""
 
 
 @dataclass
@@ -380,7 +341,7 @@ class Engine:
     # ---- 提交 -----------------------------------------------------------------
 
     async def _work(self, account: _Account, prepared: Prepared | None = None, *, at_opening: bool = False) -> None:
-        """认领所有到期的预定，排好各段的提交时刻，到点逐段提交，不等前一段的答复。
+        """认领所有到期的预定，然后逐段提交：每段等上一段的答复回来，再隔一两秒。
 
         开抢时按 `pace` 排先后；平时补交按时间先后，快要开始的先交，免得排在后面过了时间。
         """
@@ -411,58 +372,36 @@ class Engine:
                 span=lambda segment: segment.span,
                 hot=lambda segment: self.store.hotness(segment.room, segment.span, segment.day),
             )
-        if self.store.member(member_id) is None:
-            return
-        live = []
+        not_before: datetime | None = None
         for segment in queued:
+            if self.store.member(member_id) is None:
+                return
             if self._started(segment):
                 self._fail(segment, "时间已过")
-            else:
-                live.append(segment)
-        submissions = [
-            self._submit(account, segment, (prepared or {}).pop(_key(segment), None), turn)
-            for segment, turn in zip(live, self._turns(live), strict=True)
-        ]
-        for result in await asyncio.gather(*submissions, return_exceptions=True):
-            if isinstance(result, Exception):
-                log.error("成员 %s 提交时出错：%r", member_id, result)
+                continue
+            if not_before is None:  # 第一段：开放后几秒；白天补交时开放早已过去，不必等
+                not_before = open_at(segment.day) + timedelta(seconds=self.pace.first())
+            posts = account.posts
+            try:
+                await self._submit(account, segment, (prepared or {}).pop(_key(segment), None), not_before)
+            except Exception:  # 一段出了意外，不能连累后面的段；发出过的留着“已发出”，以后核对
+                log.exception("成员 %s 提交 %s %s 时出错", member_id, segment.day, segment.span)
+            if account.posts != posts:  # 真正交出去了，下一段从答复回来时起算；没交出去就沿用原来的时刻
+                not_before = self.clock.now() + timedelta(seconds=self.pace.gap())
 
-    def _turns(self, segments: list[Claimed]) -> list[_Turn]:
-        """排好各段的先后：第一段在开放后几秒，之后每段再晚几秒。
-
-        白天补交时开放早已过去，第一段就排在一张新表单刚好满 2 秒的时候。
-        """
-        turns: list[_Turn] = []
-        if not segments:
-            return turns
-        soonest = self.clock.now() + timedelta(seconds=FORM_AGE)
-        planned = max(soonest, open_at(segments[0].day) + timedelta(seconds=self.pace.first()))
-        previous, gap = None, timedelta(0)
-        for _ in segments:
-            turn = _Turn(planned, previous, gap)
-            turns.append(turn)
-            previous, gap = turn.sent, timedelta(seconds=self.pace.gap())
-            planned += gap
-        return turns
-
-    async def _submit(self, account: _Account, segment: Claimed, ready: tuple[Form, float] | None, turn: _Turn) -> None:
-        try:
-            await self._submit_in_turn(account, segment, ready, turn)
-        finally:
-            turn.skip()  # 没有交出去也要让下一段接着走
-
-    async def _submit_in_turn(
-        self, account: _Account, segment: Claimed, ready: tuple[Form, float] | None, turn: _Turn
+    async def _submit(
+        self, account: _Account, segment: Claimed, ready: tuple[Form, float] | None, not_before: datetime
     ) -> None:
+        """提交一段，直到有结果。前一段的答复回来之前不会调用，同一个成员同时只有一笔在学校那里处理。"""
         school, profile = account.school, account.profile
         form, fetched = ready if ready else (None, 0.0)
         if form is None:  # 没有预先取好的表单：到点前几秒再取，满 2 秒正好提交
-            await self.clock.sleep_until(turn.planned - timedelta(seconds=FORM_AGE + 1))
+            await self.clock.sleep_until(not_before - timedelta(seconds=FORM_AGE + 1))
             if self.store.member(account.member.id) is None:
                 return None
         not_open_since: float | None = None
         refetched = resigned = False
-        network_failures = too_fast = 0
+        network_failures = too_fast = busy = 0
         while True:
             if form is None:
                 try:
@@ -482,16 +421,15 @@ class Engine:
                     return self._fail(segment, str(error))
                 fetched = self.clock.monotonic()
             await self.clock.sleep(FORM_AGE - (self.clock.monotonic() - fetched))
-            if not turn.sent.done():  # 只有第一次提交要排队，重试不再等
-                await turn.wait(self.clock)
-            await self.clock.sleep_until(open_at(segment.day))
+            await self.clock.sleep_until(max(open_at(segment.day), not_before))
             if self._started(segment):
                 return self._fail(segment, "时间已过")
-            if not self.store.mark_sent(segment.id, form.booking_id, self.clock.now()):
+            member = self.store.member(account.member.id)  # 现读，晚上刚在设置里改的电话和主题也算数
+            if member is None or not self.store.mark_sent(segment.id, form.booking_id, self.clock.now()):
                 return None  # 这一段已经不在了（成员被移除），不再提交
-            turn.release(self.clock.now())
+            account.posts += 1
             try:
-                reply = await school.submit(profile, form, account.phone)
+                reply = await school.submit(profile, form, member.phone or DEFAULT_PHONE, member.theme or DEFAULT_THEME)
             except SessionLost as error:  # 请求被挡在登录这一步，没有到达学校，可以放心重来
                 self.store.requeue(segment.id)
                 if resigned or not await self._resign(account):
@@ -521,6 +459,12 @@ class Engine:
                 if too_fast > TOO_FAST_RETRIES:
                     return self._fail(segment, reply.message)
                 await self.clock.sleep(2.0)
+            elif reply.verdict is Verdict.BUSY:  # 前一笔还在学校那里处理（例如答复超时的那一笔）
+                busy += 1
+                if busy > BUSY_RETRIES:
+                    return self._fail(segment, reply.message)
+                refetched = False  # 学校这时可能已经作废了这张表单，再给一次重新取表单的机会
+                await self.clock.sleep(BUSY_WAIT)
             elif reply.verdict is Verdict.NOT_OPEN:
                 not_open_since = self.clock.monotonic() if not_open_since is None else not_open_since
                 if self.clock.monotonic() - not_open_since >= NOT_OPEN_WINDOW:
@@ -596,28 +540,18 @@ class Engine:
     async def _resign(self, account: _Account) -> bool:
         """在已有的会话上再确认一次登录；会话还有效时只是一次很快的请求。
 
-        同一个成员的几段同时发现登录失效时，只有第一段真正去登录，其余的沿用它的结果；
         学校拒绝了密码之后，不再拿同一个密码去试，免得账号被锁。
         """
-        seen = account.renewals
-        async with account.renewing:
-            if account.renewals != seen and account.renewed:
-                return True  # 别的段刚刚重新登录成功；没成功的话，下面自己再试（密码被拒时会被挡住）
-            member = self.store.member(account.member.id)
-            if member is None or not member.login_ok:
-                return False
-            renewal = asyncio.ensure_future(self._resign_now(account))
-            try:
-                renewed = await asyncio.shield(renewal)
-            except asyncio.CancelledError:
-                # 被取消的只是等待：让这次登录做完、记下结果（尤其是密码被拒），再响应取消
-                await asyncio.gather(renewal, return_exceptions=True)
-                raise
-            finally:
-                if renewal.done() and not renewal.cancelled() and renewal.exception() is None:
-                    account.renewals += 1
-                    account.renewed = renewal.result()
-            return renewed
+        member = self.store.member(account.member.id)
+        if member is None or not member.login_ok:
+            return False
+        renewal = asyncio.ensure_future(self._resign_now(account))
+        try:
+            return await asyncio.shield(renewal)
+        except asyncio.CancelledError:
+            # 被取消的只是等待：让这次登录做完，结果（尤其是密码被拒）照常记下，再响应取消
+            await asyncio.gather(renewal, return_exceptions=True)
+            raise
 
     async def _resign_now(self, account: _Account) -> bool:
         try:

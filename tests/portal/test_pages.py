@@ -84,10 +84,12 @@ def test_booking_form_is_serialized_like_the_browser_does():
 
 def test_filled_form_has_our_four_answers_in_place():
     form = pages.form_by_id(sample("book_form.html"), "bizFieldBookMainForm")
-    filled = Form("room", date(2026, 11, 25), Span(1380, 1410), tuple(form.pairs())).filled("")
+    blank = Form("room", date(2026, 11, 25), Span(1380, 1410), tuple(form.pairs()))
+    filled = blank.filled("")
     values = dict(filled)
     assert len(filled) == 46
-    assert values["theme"] == values["bizFieldBookField.theme"] == values["bizFieldBookField.useDesc"] == "1"
+    assert values["theme"] == values["bizFieldBookField.theme"] == values["bizFieldBookField.useDesc"] == "练琴"
+    assert dict(blank.filled("", "1"))["bizFieldBookField.useDesc"] == "1"
     assert values["bizFieldBookField.joinNums"] == "1"
     assert values["userPhone"] == "000000"
     assert [name for name, _ in filled] == [name for name, _ in form.pairs()]
@@ -105,6 +107,7 @@ def test_adfs_error_and_extra_auth_markers():
     [
         ({"success": True, "message": "保存成功", "obj": {}}, Verdict.BOOKED),
         ({"success": False, "message": "操作过快，请稍后重试!"}, Verdict.TOO_FAST),
+        ({"success": False, "message": "您有预订正在处理中，请勿重复提交!"}, Verdict.BUSY),
         ({"success": False, "message": "预订页面已失效，请刷新后重新提交!"}, Verdict.STALE),
         ({"success": False, "message": "至多提前0天预订"}, Verdict.NOT_OPEN),
         ({"success": False, "message": "至多提前1天预订"}, Verdict.NOT_OPEN),

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}设置 · MUS Booking{% endblock %}
+{% block body %}
+<main class="page form-page">
+  <a class="back" href="{{ u('/') }}" aria-label="返回">{{ icon('back', 24) }}</a>
+  <h1 class="title">设置</h1>
+
+  <form class="settings" method="post" hx-push-url="false" action="{{ u('/settings') }}" hx-disabled-elt="find button">
+    <div class="group">
+      <label class="row">
+        <span class="row-label">主题</span>
+        <input class="row-input" name="theme" value="{{ values.get('theme', '') }}" maxlength="20" autocomplete="off" placeholder="{{ default_theme }}">
+      </label>
+      <label class="row">
+        <span class="row-label">电话</span>
+        <input class="row-input" name="phone" type="tel" value="{{ values.get('phone', '') }}" inputmode="numeric" autocomplete="tel" placeholder="选填">
+      </label>
+    </div>
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    {% if saved %}<p class="saved" role="status">{{ icon('check', 14) }}{{ saved }}</p>{% endif %}
+    <div class="push"></div>
+    <button class="primary" type="submit"><span class="btn-label">保存</span><span class="spinner" aria-hidden="true"></span></button>
+  </form>
+</main>
+{% endblock %}

@@ -43,8 +43,8 @@ USER_AGENT = (
 )
 TIMEOUT = 20.0
 SUBMIT_TIMEOUT = 30.0
-THEME = "1"
-"""预定主题和用途说明。大家随手填的多是“1”，写成“练琴”反而显眼。"""
+DEFAULT_THEME = "练琴"
+"""预定主题和用途说明的默认值。成员可以在设置里改，例如改成大家常填的“1”。"""
 DEFAULT_PHONE = "000000"
 FORM_ID = "bizFieldBookMainForm"
 _REDIRECTS = {301, 302, 303, 307, 308}
@@ -97,11 +97,12 @@ class Form:
     def booking_id(self) -> str:
         return dict(self.pairs).get("id", "")
 
-    def filled(self, phone: str) -> list[tuple[str, str]]:
+    def filled(self, phone: str, theme: str = DEFAULT_THEME) -> list[tuple[str, str]]:
+        theme = theme or DEFAULT_THEME
         values = {
-            "theme": THEME,
-            "bizFieldBookField.theme": THEME,
-            "bizFieldBookField.useDesc": THEME,
+            "theme": theme,
+            "bizFieldBookField.theme": theme,
+            "bizFieldBookField.useDesc": theme,
             "bizFieldBookField.joinNums": "1",
             "userPhone": phone or DEFAULT_PHONE,
         }
@@ -112,6 +113,7 @@ class Form:
 class Verdict(StrEnum):
     BOOKED = "booked"
     TOO_FAST = "too_fast"
+    BUSY = "busy"
     STALE = "stale"
     NOT_OPEN = "not_open"
     TAKEN = "taken"
@@ -120,6 +122,7 @@ class Verdict(StrEnum):
 
 _VERDICTS = (
     ("操作过快", Verdict.TOO_FAST),
+    ("正在处理中", Verdict.BUSY),
     ("页面已失效", Verdict.STALE),
     ("至多提前", Verdict.NOT_OPEN),
     ("已经被预订", Verdict.TAKEN),
@@ -403,13 +406,13 @@ class School:
             raise Unexpected(f"没有取到预定表单（HTTP {page.status_code}）")
         return Form(room, day, span, tuple(found.pairs()))
 
-    async def submit(self, profile: Profile, form: Form, phone: str) -> Reply:
+    async def submit(self, profile: Profile, form: Form, phone: str, theme: str = DEFAULT_THEME) -> Reply:
         """提交一张表单。这是唯一会在学校系统里产生预定的请求。"""
         url = f"{BOOKING}/a/field/book/bizFieldBookMain/saveData?reBookMainId=&ruleId={profile.rule_id}"
         try:
             response = await self._client.post(
                 url,
-                content=urlencode(form.filled(phone)).encode(),
+                content=urlencode(form.filled(phone, theme)).encode(),
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                     "X-Requested-With": "XMLHttpRequest",

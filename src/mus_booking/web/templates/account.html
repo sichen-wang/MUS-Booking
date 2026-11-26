@@ -11,11 +11,6 @@
       <span class="row-label">学号</span>
       <span class="row-value mono">{{ member.student_id }}</span>
     </div>
-    <form class="row" method="post" hx-push-url="false" action="{{ u('/account/phone') }}">
-      <label class="row-label" for="phone">电话</label>
-      <input class="row-input" id="phone" name="phone" type="tel" value="{{ member.phone }}" inputmode="numeric" autocomplete="tel" placeholder="选填">
-      <button class="row-button" type="submit">保存</button>
-    </form>
   </div>
 
   <div class="label">学校密码</div>

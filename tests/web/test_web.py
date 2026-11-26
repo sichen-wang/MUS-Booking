@@ -53,7 +53,7 @@ class World:
     def bind(self, student_id="123000001", password="right", client=None, code=None) -> TestClient:
         client = client or self.client
         response = client.post(
-            "/bind", data={"code": code or self.invite(), "student_id": student_id, "password": password, "phone": ""}
+            "/bind", data={"code": code or self.invite(), "student_id": student_id, "password": password}
         )
         assert response.status_code == 200, response.text
         return client
@@ -102,7 +102,6 @@ def test_binding_signs_in_and_uses_up_the_invite(world):
         ({"student_id": "123000001", "password": "wrong"}, "学号或密码不对"),
         ({"student_id": "", "password": "right"}, "请填写学号"),
         ({"student_id": "cuhksz\123000001", "password": "right"}, "学号只能填数字"),
-        ({"student_id": "123000001", "password": "right", "phone": "abc"}, "电话只能填数字"),
     ],
 )
 def test_binding_errors_are_shown_on_the_form(world, form, message):
@@ -243,6 +242,48 @@ def test_members_cannot_see_or_touch_each_others_bookings(world):
 def test_pages_for_members_send_visitors_home(world):
     assert world.client.get("/add", follow_redirects=False).headers["location"] == "/"
     assert world.client.post("/add", data={}, follow_redirects=False).status_code == 303
+
+
+# ---- 设置 ----------------------------------------------------------------------
+
+
+def test_binding_asks_only_for_the_invite_student_id_and_password(world):
+    page = world.client.get("/").text
+    assert 'name="phone"' not in page and 'name="student_id"' in page
+    world.bind()
+    member = world.store.member(1)
+    assert (member.phone, member.theme) == ("", "练琴")
+
+
+def test_settings_change_the_theme_and_phone(world):
+    world.bind()
+    home = world.client.get("/").text
+    assert 'href="/settings"' in home
+    page = world.client.get("/settings").text
+    assert 'value="练琴"' in page and 'name="phone"' in page
+    saved = world.client.post("/settings", data={"theme": "  1 ", "phone": "138 0000 0000"})
+    assert "已保存" in saved.text
+    member = world.store.member(1)
+    assert (member.theme, member.phone) == ("1", "13800000000")
+    world.client.post("/settings", data={"theme": "", "phone": ""})
+    assert world.store.member(1).theme == "练琴"  # 留空就回到默认
+
+
+def test_settings_reject_a_bad_phone_and_keep_what_was_typed(world):
+    world.bind()
+    world.client.post("/settings", data={"theme": "", "phone": "13800000000"})
+    for phone in ("abc", "+8613800000000", "１３８００００００００"):
+        response = world.client.post("/settings", data={"theme": "1", "phone": phone})
+        assert "电话只能填数字" in response.text
+        assert 'value="1"' in response.text and f'value="{phone}"' in response.text
+    member = world.store.member(1)
+    assert (member.theme, member.phone) == ("练琴", "13800000000")
+
+
+def test_the_account_page_no_longer_holds_the_phone(world):
+    world.bind()
+    assert 'name="phone"' not in world.client.get("/account").text
+    assert world.client.post("/account/phone", data={"phone": "1"}).status_code in {404, 405}
 
 
 # ---- 管理页 --------------------------------------------------------------------

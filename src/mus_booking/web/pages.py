@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from ..domain import HORIZON, State, hhmm, open_at, ranked
-from ..portal import Profile
+from ..portal import DEFAULT_THEME, Profile
 from ..store import Member, Session, password_matches
 from . import actions, views
 from .actions import Refused
@@ -144,7 +144,6 @@ async def bind(request: Request) -> Response:
             values.get("code", ""),
             student_id,
             values.get("password", ""),
-            values.get("phone", ""),
         )
     except Refused as refused:
         values.pop("password", None)
@@ -447,16 +446,31 @@ def _account(request: Request, current: Visitor, *, error: str = "", saved: str 
     return render(request, "account.html", member=current.member, admin=current.session.admin, error=error, saved=saved)
 
 
-@router.post("/account/phone")
-async def save_phone(request: Request) -> Response:
+@router.get("/settings")
+async def settings(request: Request) -> Response:
+    return _settings(request, member_of(request))
+
+
+def _settings(request: Request, current: Visitor, *, values=None, error: str = "", saved: str = "") -> Response:
+    member = current.member
+    shown = values or {"theme": member.theme, "phone": member.phone}
+    return render(request, "settings.html", values=shown, default_theme=DEFAULT_THEME, error=error, saved=saved)
+
+
+@router.post("/settings")
+async def save_settings(request: Request) -> Response:
     current = member_of(request)
     values = await _form(request)
     try:
+        theme = actions.clean_theme(values.get("theme", ""))
         phone = actions.clean_phone(values.get("phone", ""))
     except Refused as refused:
-        return _account(request, current, error=str(refused))
-    services(request).store.set_phone(current.member.id, phone)
-    return go(request, "/account")
+        return _settings(request, current, values=values, error=str(refused))
+    store = services(request).store
+    with store.transaction():
+        store.set_theme(current.member.id, theme)
+        store.set_phone(current.member.id, phone)
+    return _settings(request, visitor(request) or current, saved="已保存")
 
 
 @router.post("/account/password")

@@ -32,10 +32,6 @@
       <span class="field-label">密码</span>
       <input name="password" type="password" autocomplete="current-password" required>
     </label>
-    <label class="field">
-      <span class="field-label">电话</span>
-      <input name="phone" type="tel" value="{{ values.get('phone', '') }}" inputmode="numeric" autocomplete="tel" placeholder="选填">
-    </label>
     <p class="reassure">{{ icon('lock', 16) }}<span>密码会加密保存在服务器上。</span></p>
     {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
     <div class="push"></div>
