@@ -117,7 +117,6 @@ CREATE TABLE admin (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     name TEXT NOT NULL,
     secret TEXT NOT NULL,
-    member_id INTEGER REFERENCES members(id) ON DELETE SET NULL,
     updated_at TEXT NOT NULL
 );
 """
@@ -136,13 +135,18 @@ CREATE TABLE taken (
 CREATE INDEX taken_room ON taken(room, day);
 """
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 _UPGRADES = {
     1: _ADMIN + "DROP TABLE admin_links;",  # 第 2 版：一次性管理链接换成管理账号
     2: _TAKEN,  # 第 3 版：记录开放后不久被别人订走的时段
     3: f"ALTER TABLE members ADD COLUMN theme TEXT NOT NULL DEFAULT '{DEFAULT_THEME}';",  # 第 4 版：成员自己的主题
     4: "ALTER TABLE members ADD COLUMN people INTEGER NOT NULL DEFAULT 1;"  # 第 5 版：参与人数和用途说明
     " ALTER TABLE members ADD COLUMN purpose TEXT NOT NULL DEFAULT '';",
+    # 第 6 版：管理账号不再对应成员。这一列带外键，SQLite 删不掉，只好换一张表
+    5: "CREATE TABLE admin_next (id INTEGER PRIMARY KEY CHECK (id = 1), name TEXT NOT NULL,"
+    " secret TEXT NOT NULL, updated_at TEXT NOT NULL);"
+    " INSERT INTO admin_next (id, name, secret, updated_at) SELECT id, name, secret, updated_at FROM admin;"
+    " DROP TABLE admin; ALTER TABLE admin_next RENAME TO admin;",
 }
 
 
@@ -197,10 +201,9 @@ class Session:
 
 @dataclass(frozen=True)
 class AdminAccount:
-    """唯一的管理账号。对应了成员时，用它登录就同时进入这位成员的首页。"""
+    """唯一的管理账号。它只管理，不对应任何成员。"""
 
     name: str
-    member_id: int | None
 
 
 @dataclass(frozen=True)
@@ -602,35 +605,31 @@ class Store:
     def set_admin(self, name: str, password: str, now: datetime) -> None:
         """设置管理账号的名字和密码。
 
-        重新设置时，所有浏览器上的管理权限一并收回（例如手机丢了），与成员的对应也解除，之后在管理页重新指定。
+        重新设置时，所有浏览器上的管理权限一并收回（例如手机丢了）。
         """
         secret = _hash_password(password)
         with self.transaction():
             self._db.execute(
-                "INSERT INTO admin (id, name, secret, member_id, updated_at) VALUES (1, ?, ?, NULL, ?)"
+                "INSERT INTO admin (id, name, secret, updated_at) VALUES (1, ?, ?, ?)"
                 " ON CONFLICT (id) DO UPDATE SET name = excluded.name, secret = excluded.secret,"
-                " member_id = NULL, updated_at = excluded.updated_at",
+                " updated_at = excluded.updated_at",
                 (name, secret, _t(now)),
             )
             self._db.execute("UPDATE sessions SET admin = 0 WHERE admin = 1")
 
     def admin_account(self) -> AdminAccount | None:
-        row = self._one("SELECT name, member_id FROM admin WHERE id = 1")
-        return AdminAccount(row["name"], row["member_id"]) if row else None
+        row = self._one("SELECT name FROM admin WHERE id = 1")
+        return AdminAccount(row["name"]) if row else None
 
     def admin_secret(self, name: str) -> tuple[AdminAccount, str] | None:
         """名字（不分大小写）对得上时，返回管理账号和密码散列，由调用方用 `password_matches` 核对。
 
         核对要算几十毫秒的 scrypt，网页里放到别的线程去算，免得耽误同一个事件循环里的提交。
         """
-        row = self._one("SELECT name, secret, member_id FROM admin WHERE id = 1")
+        row = self._one("SELECT name, secret FROM admin WHERE id = 1")
         if row is None or row["name"].casefold() != name.strip().casefold():
             return None
-        return AdminAccount(row["name"], row["member_id"]), row["secret"]
-
-    def set_admin_member(self, member_id: int | None) -> None:
-        """指定管理账号对应哪位成员（管理员本人）。用管理账号登录时就直接进入这位成员的首页。"""
-        self._db.execute("UPDATE admin SET member_id = ? WHERE id = 1", (member_id,))
+        return AdminAccount(row["name"]), row["secret"]
 
     # ---- 抢手程度 -------------------------------------------------------------
 

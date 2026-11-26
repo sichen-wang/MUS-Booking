@@ -276,9 +276,6 @@ button[disabled] .btn-label { display: none; }
 }
 
 .settings { display: flex; flex: 1; flex-direction: column; }
-.self-tag { margin-left: 8px; vertical-align: 1px; }
-.actions-cell form { display: inline-block; }
-.actions-cell form + form { margin-left: 6px; }
 
 /* ---- 底部面板 ------------------------------------------------------------- */
 

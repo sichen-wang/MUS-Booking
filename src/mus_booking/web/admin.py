@@ -13,7 +13,7 @@ from ..domain import State, next_opening
 from ..store import Invite, LogEntry, Member
 from . import views
 from .app import go, render, services
-from .pages import Visitor, now_of, start_session, visitor
+from .pages import Visitor, now_of, visitor
 
 router = APIRouter(prefix="/admin")
 
@@ -87,7 +87,6 @@ async def page(request: Request) -> Response:
         invite_url=f"{str(request.base_url).rstrip('/')}/?invite=",
         log=log,
         me=current.member.id if current.member else None,
-        self_id=store.admin_account().member_id if store.admin_account() else None,
     )
 
 
@@ -108,20 +107,6 @@ async def void_invite(request: Request, code: str) -> Response:
 @router.post("/members/{member_id}/remove")
 async def remove_member(request: Request, member_id: int) -> Response:
     current = _admin(request)
-    store = services(request).store
-    account = store.admin_account()
-    mine = {current.member.id if current.member else None, account.member_id if account else None}
-    if member_id not in mine:  # 不在这里移除管理员本人，免得连同会话和预定一起删掉
-        store.remove_member(member_id, now_of(request))
+    if current.member is None or current.member.id != member_id:  # 不移除当前浏览器自己登录着的成员
+        services(request).store.remove_member(member_id, now_of(request))
     return go(request, "/admin")
-
-
-@router.post("/members/{member_id}/self")
-async def mark_self(request: Request, member_id: int) -> Response:
-    """把这位成员指定为管理员本人，并让当前浏览器同时进入这位成员的首页。"""
-    current = _admin(request)
-    store = services(request).store
-    if store.member(member_id) is None:
-        raise HTTPException(404)
-    store.set_admin_member(member_id)
-    return start_session(request, member_id, go(request, "/admin"), current, admin=True)

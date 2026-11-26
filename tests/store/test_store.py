@@ -143,11 +143,34 @@ def test_a_version_one_database_is_upgraded_in_place(tmp_path):
     store = Store.open(path, vault)
     tables = {row[0] for row in store._db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"admin", "observed", "taken"} <= tables and "admin_links" not in tables
+    assert "member_id" not in {row[1] for row in store._db.execute("PRAGMA table_info(admin)")}
     assert store._db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert store.member(member).student_id == "123000001"
     assert store.invite(code).usable
     old = store.member(member)
     assert (old.theme, old.people, old.purpose) == ("练琴", 1, "")  # 原有成员用默认值
+    store.close()
+
+
+def test_the_admin_account_survives_dropping_its_member_link(tmp_path):
+    vault = Vault(Fernet.generate_key())
+    path = tmp_path / "mus-booking.db"
+    store = Store.open(path, vault)
+    member = add(store)
+    store.set_admin("Keeper", "open sesame", NOW)
+    store._db.executescript(  # 退回第 5 版：管理账号还带着对应成员的一列
+        "ALTER TABLE admin RENAME TO admin_v6;"
+        " CREATE TABLE admin (id INTEGER PRIMARY KEY CHECK (id = 1), name TEXT NOT NULL, secret TEXT NOT NULL,"
+        " member_id INTEGER REFERENCES members(id) ON DELETE SET NULL, updated_at TEXT NOT NULL);"
+        f" INSERT INTO admin SELECT id, name, secret, {member}, updated_at FROM admin_v6;"
+        " DROP TABLE admin_v6; PRAGMA user_version = 5;"
+    )
+    store.close()
+
+    store = Store.open(path, vault)
+    account, secret = store.admin_secret("keeper")
+    assert account == AdminAccount("Keeper") and password_matches("open sesame", secret)
+    assert store.member(member) is not None
     store.close()
 
 
@@ -204,7 +227,7 @@ def test_the_admin_password_is_stored_only_as_a_hash(store):
     assert store.admin_secret("Keeper") is None
     store.set_admin("Keeper", "open sesame", NOW)
     account, secret = store.admin_secret(" keeper ")
-    assert account == AdminAccount("Keeper", None)
+    assert account == AdminAccount("Keeper")
     assert "open sesame" not in secret and secret.startswith("scrypt$")
     assert password_matches("open sesame", secret)
     assert not password_matches("open sesam", secret)
@@ -219,19 +242,6 @@ def test_resetting_the_admin_password_takes_admin_rights_back_from_every_browser
     store.set_admin("Keeper", "new secret", NOW)
     assert store.session(lost_phone, NOW).admin is False
     assert store.session(own_phone, NOW) == Session(member, False)
-
-
-def test_the_admins_own_member_is_set_explicitly_and_released_by_reset_or_removal(store):
-    store.set_admin("Keeper", "open sesame", NOW)
-    first, second = add(store), add(store, "123000002")
-    store.set_admin_member(first)
-    assert store.admin_account().member_id == first
-    store.set_admin("Keeper", "new secret", NOW)
-    assert store.admin_account().member_id is None
-    store.set_admin_member(second)
-    assert store.admin_account().member_id == second
-    store.remove_member(second, NOW)
-    assert store.admin_account() == AdminAccount("Keeper", None)
 
 
 # ---- 预定与段 ------------------------------------------------------------------

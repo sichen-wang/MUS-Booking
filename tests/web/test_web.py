@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from mus_booking.domain import CHINA, Booking, Outcome, Span
 from mus_booking.engine import Engine
 from mus_booking.portal.fake import FakeSchool
-from mus_booking.store import Store, Vault
+from mus_booking.store import Session, Store, Vault
 from mus_booking.web.app import Services, create_app
 
 NOW = datetime(2026, 11, 25, 10, 0, tzinfo=CHINA)
@@ -341,50 +341,15 @@ def test_signing_in_a_member_in_the_admins_browser_neither_ties_them_nor_keeps_a
     sign_in_as_admin(phone)
     assert "回到管理" in phone.get("/").text
     world.bind(client=phone)  # 例如帮别人看看账号
-    assert world.store.admin_account().member_id is None
     assert phone.get("/admin").status_code == 404
     assert 'href="/admin"' not in phone.get("/account").text
 
 
-def test_the_admin_marks_their_own_member_on_the_admin_page(world):
-    world.bind()  # 1 号，管理员本人
-    world.bind(student_id="123000002", client=world.new_client())  # 2 号，别人
-    world.store.set_admin("Keeper", "open sesame", NOW)
-    phone = world.new_client()
-    sign_in_as_admin(phone)
-    page = phone.get("/admin").text
-    assert "/admin/members/1/self" in page and "/admin/members/2/self" in page
-    phone.post("/admin/members/1/self")
-    assert world.store.admin_account().member_id == 1
-    page = phone.get("/admin").text
-    assert "本人" in page and "回到我的预定" in page
-    assert "/admin/members/1/remove" not in page and "/admin/members/2/remove" in page
-
-    laptop = world.new_client()  # 换一台设备，用管理账号登录一次就同时回到本人的首页和管理页
-    assert sign_in_as_admin(laptop).headers["location"] == "/"
-    assert laptop.get("/admin").status_code == 200
-    assert world.store.session(laptop.cookies["mb_session"], NOW).member_id == 1
-
-    phone.post("/admin/members/2/self")  # 点错了可以改
-    assert world.store.admin_account().member_id == 2
-    assert world.new_client().post("/admin/members/1/self").status_code == 404
-
-
-def test_signing_in_as_admin_on_someone_elses_phone_does_not_tie_them_together(world):
+def test_signing_in_as_admin_gives_only_the_admin_page_even_on_a_members_phone(world):
     world.store.set_admin("Keeper", "open sesame", NOW)
     friend = world.bind()
     assert sign_in_as_admin(friend).headers["location"] == "/admin"
-    assert world.store.admin_account().member_id is None
-
-
-def test_admins_cannot_remove_themselves(world):
-    world.bind()
-    world.store.set_admin("Keeper", "open sesame", NOW)
-    phone = world.new_client()
-    sign_in_as_admin(phone)
-    phone.post("/admin/members/1/self")
-    phone.post("/admin/members/1/remove")
-    assert [member.id for member in world.store.members()] == [1]
+    assert world.store.session(friend.cookies["mb_session"], NOW) == Session(None, True)
 
 
 def test_admins_generate_invites_and_remove_members(world):

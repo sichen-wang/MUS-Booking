@@ -172,7 +172,7 @@ async def login(request: Request) -> Response:
 
 
 async def _admin_login(request: Request, name: str, password: str) -> Response:
-    """管理账号登录。只进入管理账号自己对应的成员；还没有对应时只进管理页，不顺带对应当前浏览器里的成员。"""
+    """管理账号登录：新会话只有管理权限，不带任何成员。"""
     store = services(request).store
     found = store.admin_secret(name)
     keys = (f"ip:{_client(request)}", "admin") if found else (f"ip:{_client(request)}",)
@@ -181,9 +181,7 @@ async def _admin_login(request: Request, name: str, password: str) -> Response:
     elif found is None or not await asyncio.to_thread(password_matches, password, found[1]):
         error = "账号或密码不对"
     else:
-        member_id = found[0].member_id
-        response = go(request, "/" if member_id else "/admin")
-        return start_session(request, member_id, response, visitor(request), admin=True)
+        return start_session(request, None, go(request, "/admin"), visitor(request), admin=True)
     return render(request, "login.html", values={"student_id": name}, error=error)
 
 
