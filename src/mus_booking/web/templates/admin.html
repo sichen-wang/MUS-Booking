@@ -10,8 +10,6 @@
     <span class="spacer"></span>
     {% if me %}
     <a class="admin-back" href="{{ u('/') }}">回到我的预定</a>
-    {% else %}
-    <a class="admin-back" href="{{ u('/') }}">绑定账号</a>
     {% endif %}
   </header>
 
@@ -32,7 +30,7 @@
         <tbody>
           {% for r in rows %}
           <tr>
-            <td><div class="who">{{ r.member.name or '—' }}</div><div class="sid">{{ r.member.student_id }}</div></td>
+            <td><div class="who">{{ r.member.name or '—' }}{% if r.member.id == self_id %}<span class="tag self-tag">本人</span>{% endif %}</div><div class="sid">{{ r.member.student_id }}</div></td>
             <td>{% if r.member.login_ok %}<span class="pill pill-success">正常</span>{% else %}<span class="pill pill-fail">登录失效</span>{% endif %}</td>
             <td class="{{ '' if r.planned else 'muted' }}">{{ '%d 个时段' % r.planned if r.planned else '无' }}</td>
             <td>{% if r.booked or r.failed %}
@@ -41,7 +39,8 @@
               {%- if r.failed %}<span class="tone-fail">{{ r.failed }} 个时段预定失败</span>{% endif %}
             {%- else %}<span class="muted">—</span>{% endif %}</td>
             <td class="actions-cell">
-              {% if r.member.id != me %}
+              {% if r.member.id != self_id and r.member.id != me %}
+              <form method="post" hx-push-url="false" action="{{ u('/admin/members/%d/self' % r.member.id) }}"><button class="small">设为本人</button></form>
               <form method="post" hx-push-url="false" action="{{ u('/admin/members/%d/remove' % r.member.id) }}"><button class="small" data-confirm="确认移除">移除</button></form>
               {% endif %}
             </td>

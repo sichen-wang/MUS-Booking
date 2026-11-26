@@ -312,7 +312,7 @@ def test_the_admin_signs_in_on_the_login_page_with_a_name(world):
     assert sign_in_as_admin(admin, name="keeper").headers["location"] == "/admin"
     page = admin.get("/admin")
     assert page.status_code == 200 and "邀请码" in page.text
-    assert "绑定账号" in page.text and "退出登录" in page.text  # 还没有对应成员
+    assert "退出登录" in page.text and "回到我的预定" not in page.text  # 还没有指定本人
 
 
 def test_admin_and_member_sign_ins_share_the_budget_of_one_address(world):
@@ -335,20 +335,39 @@ def test_guessing_the_admin_password_from_many_addresses_is_limited_too(world):
     assert "账号或密码不对" in sign_in_as_admin(world.new_client(address="10.0.2.1"), name="someone").text
 
 
-def test_binding_while_signed_in_as_admin_ties_the_two_together(world):
+def test_signing_in_a_member_in_the_admins_browser_neither_ties_them_nor_keeps_admin(world):
     world.store.set_admin("Keeper", "open sesame", NOW)
     phone = world.new_client()
     sign_in_as_admin(phone)
     assert "回到管理" in phone.get("/").text
-    world.bind(client=phone)
-    assert world.store.admin_account().member_id == 1
-    assert "回到我的预定" in phone.get("/admin").text
-    assert 'href="/admin"' in phone.get("/account").text
+    world.bind(client=phone)  # 例如帮别人看看账号
+    assert world.store.admin_account().member_id is None
+    assert phone.get("/admin").status_code == 404
+    assert 'href="/admin"' not in phone.get("/account").text
 
-    laptop = world.new_client()  # 换一台设备，用管理账号登录一次就同时回到成员首页和管理页
+
+def test_the_admin_marks_their_own_member_on_the_admin_page(world):
+    world.bind()  # 1 号，管理员本人
+    world.bind(student_id="123000002", client=world.new_client())  # 2 号，别人
+    world.store.set_admin("Keeper", "open sesame", NOW)
+    phone = world.new_client()
+    sign_in_as_admin(phone)
+    page = phone.get("/admin").text
+    assert "/admin/members/1/self" in page and "/admin/members/2/self" in page
+    phone.post("/admin/members/1/self")
+    assert world.store.admin_account().member_id == 1
+    page = phone.get("/admin").text
+    assert "本人" in page and "回到我的预定" in page
+    assert "/admin/members/1/remove" not in page and "/admin/members/2/remove" in page
+
+    laptop = world.new_client()  # 换一台设备，用管理账号登录一次就同时回到本人的首页和管理页
     assert sign_in_as_admin(laptop).headers["location"] == "/"
     assert laptop.get("/admin").status_code == 200
     assert world.store.session(laptop.cookies["mb_session"], NOW).member_id == 1
+
+    phone.post("/admin/members/2/self")  # 点错了可以改
+    assert world.store.admin_account().member_id == 2
+    assert world.new_client().post("/admin/members/1/self").status_code == 404
 
 
 def test_signing_in_as_admin_on_someone_elses_phone_does_not_tie_them_together(world):
@@ -359,11 +378,11 @@ def test_signing_in_as_admin_on_someone_elses_phone_does_not_tie_them_together(w
 
 
 def test_admins_cannot_remove_themselves(world):
+    world.bind()
     world.store.set_admin("Keeper", "open sesame", NOW)
     phone = world.new_client()
     sign_in_as_admin(phone)
-    world.bind(client=phone)
-    assert "/admin/members/1/remove" not in phone.get("/admin").text
+    phone.post("/admin/members/1/self")
     phone.post("/admin/members/1/remove")
     assert [member.id for member in world.store.members()] == [1]
 

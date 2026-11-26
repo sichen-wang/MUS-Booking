@@ -63,20 +63,16 @@ def _client(request: Request) -> str:
     return request.client.host if request.client else "?"
 
 
-def _start_session(
+def start_session(
     request: Request, member_id: int | None, response: Response, current: Visitor | None, *, admin: bool = False
 ) -> Response:
     """登录或绑定之后换发一个新的会话，旧的作废，以免事先拿到旧令牌的人跟着登录。
 
-    管理权限跟着会话走：已经以管理账号登录的浏览器再登录或绑定成员，仍是管理员，
-    而管理账号还没有对应成员时，就对应到这一位，以后用管理账号登录直接进入他的首页。
+    管理权限只来自用管理账号登录这一条路：在管理员的浏览器里登录别的成员，新会话就只是那位成员。
     """
     store, now = services(request).store, now_of(request)
-    admin = admin or (current is not None and current.session.admin)
     if current is not None:
         store.drop_session(current.token)
-    if admin and member_id is not None:
-        store.claim_admin(member_id)
     set_session(request, response, store.create_session(member_id, now, admin=admin))
     return response
 
@@ -149,7 +145,7 @@ async def bind(request: Request) -> Response:
         values.pop("password", None)
         return _welcome(request, visitor(request), code=values.get("code", ""), values=values, error=str(refused))
     svc.engine.poke()
-    return _start_session(request, member, go(request, "/"), visitor(request))
+    return start_session(request, member, go(request, "/"), visitor(request))
 
 
 @router.get("/login")
@@ -172,7 +168,7 @@ async def login(request: Request) -> Response:
     except Refused as refused:
         return render(request, "login.html", values={"student_id": values.get("student_id", "")}, error=str(refused))
     svc.engine.poke()
-    return _start_session(request, member, go(request, "/"), visitor(request))
+    return start_session(request, member, go(request, "/"), visitor(request))
 
 
 async def _admin_login(request: Request, name: str, password: str) -> Response:
@@ -187,7 +183,7 @@ async def _admin_login(request: Request, name: str, password: str) -> Response:
     else:
         member_id = found[0].member_id
         response = go(request, "/" if member_id else "/admin")
-        return _start_session(request, member_id, response, visitor(request), admin=True)
+        return start_session(request, member_id, response, visitor(request), admin=True)
     return render(request, "login.html", values={"student_id": name}, error=error)
 
 

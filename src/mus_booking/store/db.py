@@ -602,7 +602,7 @@ class Store:
     def set_admin(self, name: str, password: str, now: datetime) -> None:
         """设置管理账号的名字和密码。
 
-        重新设置时，所有浏览器上的管理权限一并收回（例如手机丢了），与成员的对应也解除，之后再自动对应一次。
+        重新设置时，所有浏览器上的管理权限一并收回（例如手机丢了），与成员的对应也解除，之后在管理页重新指定。
         """
         secret = _hash_password(password)
         with self.transaction():
@@ -628,9 +628,9 @@ class Store:
             return None
         return AdminAccount(row["name"], row["member_id"]), row["secret"]
 
-    def claim_admin(self, member_id: int) -> None:
-        """管理账号还没有对应的成员时，记下这一位。"""
-        self._db.execute("UPDATE admin SET member_id = ? WHERE id = 1 AND member_id IS NULL", (member_id,))
+    def set_admin_member(self, member_id: int | None) -> None:
+        """指定管理账号对应哪位成员（管理员本人）。用管理账号登录时就直接进入这位成员的首页。"""
+        self._db.execute("UPDATE admin SET member_id = ? WHERE id = 1", (member_id,))
 
     # ---- 抢手程度 -------------------------------------------------------------
 

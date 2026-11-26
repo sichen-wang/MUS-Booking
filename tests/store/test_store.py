@@ -221,15 +221,14 @@ def test_resetting_the_admin_password_takes_admin_rights_back_from_every_browser
     assert store.session(own_phone, NOW) == Session(member, False)
 
 
-def test_the_admin_account_is_claimed_once_and_released_by_reset_or_removal(store):
+def test_the_admins_own_member_is_set_explicitly_and_released_by_reset_or_removal(store):
     store.set_admin("Keeper", "open sesame", NOW)
     first, second = add(store), add(store, "123000002")
-    store.claim_admin(first)
-    store.claim_admin(second)
+    store.set_admin_member(first)
     assert store.admin_account().member_id == first
     store.set_admin("Keeper", "new secret", NOW)
     assert store.admin_account().member_id is None
-    store.claim_admin(second)
+    store.set_admin_member(second)
     assert store.admin_account().member_id == second
     store.remove_member(second, NOW)
     assert store.admin_account() == AdminAccount("Keeper", None)
