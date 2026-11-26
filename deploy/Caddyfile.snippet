@@ -1,7 +1,14 @@
-# 加进服务器上已有的站点块（例如 13.140.76.154 { ... }）里，然后重新加载 Caddy。
-# 证书由这个站点块原有的配置负责，这里不需要再申请。
+# 加进服务器上已有的 Caddyfile，然后重新加载 Caddy。
+# 域名的 A 记录直接指向服务器（Cloudflare 上设为“仅 DNS”），证书由 Caddy 自动申请。
 
-redir /booking /booking/{?query} 308
-handle_path /booking/* {
+booking.sichenwang.com {
 	reverse_proxy 127.0.0.1:8000
 }
+
+# 最初挂在 https://13.140.76.154/booking/ 下。旧地址在 IP 的站点块里跳转到新域名的同一路径，
+# handle_path 里的 {uri} 已经去掉了 /booking 前缀，查询参数一并保留：
+#
+#	redir /booking https://booking.sichenwang.com/{?query} 308
+#	handle_path /booking/* {
+#		redir https://booking.sichenwang.com{uri} 308
+#	}

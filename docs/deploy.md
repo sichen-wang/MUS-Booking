@@ -1,6 +1,6 @@
 # 部署
 
-本文说明如何把 MUS Booking 装到一台 Ubuntu 24.04 服务器上。服务以一个 systemd 服务运行，只监听本机的 8000 端口，由服务器上已有的 Caddy 在 `https://服务器地址/booking/` 下转发进来。Caddy 负责 HTTPS 证书，本服务不碰 80 和 443 端口。
+本文说明如何把 MUS Booking 装到一台 Ubuntu 24.04 服务器上。服务以一个 systemd 服务运行，只监听本机的 8000 端口，由服务器上已有的 Caddy 以 `https://booking.sichenwang.com` 转发进来。Caddy 负责 HTTPS 证书，本服务不碰 80 和 443 端口。
 
 下面的命令都以 root 身份执行，仓库放在 `/opt/mus-booking`，数据放在 `/var/lib/mus-booking`，密钥和配置放在 `/etc/mus-booking`。
 
@@ -45,15 +45,17 @@ journalctl -u mus-booking -f
 
 ## 接入 Caddy
 
-把 `deploy/Caddyfile.snippet` 的内容加进现有 Caddyfile 中服务器地址的那个站点块，然后重新加载。Caddy 运行在 Docker 里并使用主机网络时，命令如下。
+先在 Cloudflare 上为域名添加 A 记录，指向服务器的 IP，并设为“仅 DNS”（灰云）。经 Cloudflare 代理从国内访问偏慢，而服务器的 IP 早已公开，代理带来的好处有限。然后把 `deploy/Caddyfile.snippet` 里的站点块加进现有的 Caddyfile 并重新加载，Caddy 会自动为域名申请证书。Caddy 运行在 Docker 里并使用主机网络时，命令如下。
 
 ```sh
 docker exec new-api-caddy caddy reload --config /etc/caddy/Caddyfile
 ```
 
-这台服务器上的 Caddyfile 是以单个文件挂载进容器的。单文件挂载跟随的是文件本身而不是路径，像 `sed -i` 那样先写新文件再改名的保存方式会让容器继续读到旧内容，因此要原地写入，写完先用 `docker exec new-api-caddy caddy validate --config /etc/caddy/Caddyfile` 校验，再重新加载。上线时改动前的原文件备份为 `/opt/new-api/Caddyfile.bak-20261125-before-mus-booking`。
+这台服务器上的 Caddyfile 是以单个文件挂载进容器的。单文件挂载跟随的是文件本身而不是路径，像 `sed -i` 那样先写新文件再改名的保存方式会让容器继续读到旧内容，因此要原地写入，写完先用 `docker exec new-api-caddy caddy validate --config /etc/caddy/Caddyfile` 校验，再重新加载。上线时改动前的原文件备份为 `/opt/new-api/Caddyfile.bak-20261125-before-mus-booking`，换域名前的备份在 `/root/domain-migration-20261126-091403/`。
 
-`handle_path` 会去掉地址里的 `/booking`，服务启动时的 `--root-path /booking` 再把它补回到页面上的每个链接里，两者必须一致。Caddy 默认会带上 `X-Forwarded-For` 和 `X-Forwarded-Proto`，服务只信任来自本机的这两个头。
+Caddy 从本机转发，默认会带上 `X-Forwarded-For` 和 `X-Forwarded-Proto`，服务只信任来自本机的这两个头：登录限流按真实的客户端地址计算，HTTPS 下的 Cookie 带上 Secure。表单提交要求 Origin 与请求的 Host 一致，所以反向代理不要改写 Host。
+
+服务也可以挂在某个路径下，例如 `https://服务器地址/booking/`：Caddy 用 `handle_path /booking/*` 去掉前缀后转发，服务启动时加 `--root-path /booking` 把前缀补回到页面上的每个链接里，两者必须一致。上线当天就是这样挂在 IP 地址下的，次日改为子域名，旧地址在 IP 的站点块里 308 跳转到新域名的同一路径，写法见 `deploy/Caddyfile.snippet` 的注释。换地址后，浏览器里的登录状态不会跟过去，成员要在新地址重新登录一次，手机主屏幕上的图标也要重新添加；服务器上的数据不受影响。
 
 ## 开始使用
 

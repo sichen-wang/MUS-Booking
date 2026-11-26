@@ -9,7 +9,7 @@ User=mus-booking
 Group=mus-booking
 WorkingDirectory=/opt/mus-booking
 EnvironmentFile=/etc/mus-booking/env
-ExecStart=/opt/mus-booking/.venv/bin/mus-booking serve --host 127.0.0.1 --port 8000 --root-path /booking
+ExecStart=/opt/mus-booking/.venv/bin/mus-booking serve --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=3
 # 缺少密钥等配置错误以 78 退出，重启也无济于事
